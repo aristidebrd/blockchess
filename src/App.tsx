@@ -4,7 +4,7 @@ import { useAccount } from 'wagmi';
 import WalletConnect from './components/WalletConnect';
 import GameLobby from './components/GameLobby';
 import GameView from './components/GameView';
-import { GameInfo } from './utils/chess';
+import { GameInfo, ChessPiece } from './utils/chess';
 import { wsService } from './services/websocket';
 import { gameService } from './services/gameService';
 
@@ -87,11 +87,48 @@ function App() {
   };
 
   const convertWSGameToLocalFormat = (wsGame: any): GameInfo => {
-    console.log('🔄 Converting WebSocket game data:', wsGame);
-    console.log('🔄 Player statistics in WS data:', {
-      whiteTeamPlayers: wsGame.whiteTeamPlayers,
-      blackTeamPlayers: wsGame.blackTeamPlayers
-    });
+
+    // Convert backend board format to frontend format
+    const convertBackendBoardToFrontend = (board: string[][]): (ChessPiece | null)[][] => {
+      const pieceMap: Record<string, { type: ChessPiece['type'], color: ChessPiece['color'] }> = {
+        'P': { type: 'pawn', color: 'white' },
+        'R': { type: 'rook', color: 'white' },
+        'N': { type: 'knight', color: 'white' },
+        'B': { type: 'bishop', color: 'white' },
+        'Q': { type: 'queen', color: 'white' },
+        'K': { type: 'king', color: 'white' },
+        'p': { type: 'pawn', color: 'black' },
+        'r': { type: 'rook', color: 'black' },
+        'n': { type: 'knight', color: 'black' },
+        'b': { type: 'bishop', color: 'black' },
+        'q': { type: 'queen', color: 'black' },
+        'k': { type: 'king', color: 'black' },
+      };
+
+      return board.map((row, rowIndex) =>
+        row.map((cell, colIndex) => {
+          if (!cell || cell === '') {
+            return null;
+          }
+
+          const pieceInfo = pieceMap[cell];
+          if (!pieceInfo) {
+            return null;
+          }
+
+          // Convert board coordinates to chess notation
+          const file = String.fromCharCode(97 + colIndex); // a, b, c, ...
+          const rank = (8 - rowIndex).toString(); // 8, 7, 6, ...
+
+          return {
+            type: pieceInfo.type,
+            color: pieceInfo.color,
+            position: file + rank,
+            hasMoved: false
+          } as ChessPiece;
+        })
+      );
+    };
 
     return {
       id: wsGame.gameId,
@@ -116,7 +153,14 @@ function App() {
       totalPot: wsGame.totalPot,
       whitePot: wsGame.whitePot,
       blackPot: wsGame.blackPot,
-      boardState: undefined, // Will be fetched when joining the game
+      boardState: (() => {
+        const backendBoard = wsGame.board || wsGame.Board;
+        if (backendBoard) {
+          const converted = convertBackendBoardToFrontend(backendBoard);
+          return converted;
+        }
+        return undefined;
+      })(),
       winner: wsGame.winner,
       endReason: wsGame.endReason,
       endedAt: wsGame.endedAt,

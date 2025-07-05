@@ -34,20 +34,21 @@ const (
 
 // GameInfo holds summary information about a single game
 type GameInfo struct {
-	GameID       string  `json:"gameId"`
-	WhitePlayers int     `json:"whitePlayers"`
-	BlackPlayers int     `json:"blackPlayers"`
-	TimeLeft     int     `json:"timeLeft"`
-	CurrentMove  int     `json:"currentMove"`
-	TotalPot     float64 `json:"totalPot"`
-	WhitePot     float64 `json:"whitePot"`
-	BlackPot     float64 `json:"blackPot"`
-	Spectators   int     `json:"spectators"`
-	CurrentTurn  string  `json:"currentTurn"`
-	Status       string  `json:"status"`              // "active" or "ended"
-	Winner       string  `json:"winner,omitempty"`    // "white", "black", "draw" (only for ended games)
-	EndReason    string  `json:"endReason,omitempty"` // "checkmate", "stalemate", etc. (only for ended games)
-	EndedAt      *int64  `json:"endedAt,omitempty"`   // Unix timestamp when game ended
+	GameID       string     `json:"gameId"`
+	WhitePlayers int        `json:"whitePlayers"`
+	BlackPlayers int        `json:"blackPlayers"`
+	TimeLeft     int        `json:"timeLeft"`
+	CurrentMove  int        `json:"currentMove"`
+	TotalPot     float64    `json:"totalPot"`
+	WhitePot     float64    `json:"whitePot"`
+	BlackPot     float64    `json:"blackPot"`
+	Spectators   int        `json:"spectators"`
+	CurrentTurn  string     `json:"currentTurn"`
+	Status       string     `json:"status"`              // "active" or "ended"
+	Winner       string     `json:"winner,omitempty"`    // "white", "black", "draw" (only for ended games)
+	EndReason    string     `json:"endReason,omitempty"` // "checkmate", "stalemate", etc. (only for ended games)
+	EndedAt      *int64     `json:"endedAt,omitempty"`   // Unix timestamp when game ended
+	Board        [][]string `json:"board,omitempty"`     // Current board state
 
 	// Player statistics per team (only for ended games)
 	WhiteTeamPlayers []PlayerStats `json:"whiteTeamPlayers,omitempty"`
@@ -425,8 +426,15 @@ func (h *Hub) handleMessage(msg *Message, client *Client) {
 		h.broadcastGamesListUpdate()
 
 	case TypeRequestGamesList:
-		log.Printf("Player %s requesting games list", client.id)
+		log.Printf("🎯 Player %s requesting games list", client.id)
 		gamesList := h.collectGamesInfo("all") // Return all games
+		log.Printf("🔍 Collected %d games for list request", len(gamesList))
+		for i, game := range gamesList {
+			log.Printf("🔍 Game %d: %s - Status: %s - Move: %d - HasBoard: %t", i, game.GameID, game.Status, game.CurrentMove, len(game.Board) > 0)
+			if len(game.Board) > 0 {
+				log.Printf("🔍 Board sample: %v", game.Board[0])
+			}
+		}
 
 		gamesMsg := &Message{
 			Type:             TypeGamesList,
@@ -816,6 +824,11 @@ func (h *Hub) handleGameEnd(gameID, winner, reason string, gameStats map[string]
 		endedGameInfo.BlackPot = blackPot
 	}
 
+	// Extract board data for ended games
+	if board, ok := gameStats["board"].([][]string); ok {
+		endedGameInfo.Board = board
+	}
+
 	// Extract team player statistics
 	if whiteTeamPlayers, ok := gameStats["whiteTeamPlayers"].([]map[string]any); ok {
 		endedGameInfo.WhiteTeamPlayers = make([]PlayerStats, len(whiteTeamPlayers))
@@ -858,6 +871,7 @@ func (h *Hub) collectGamesInfo(filter string) []GameInfo {
 	if filter == "active" || filter == "all" {
 		// Iterate through all games in the game manager (not just game rooms)
 		allGameIDs := h.gameManager.GetAllGames()
+		log.Printf("🔍 Found %d total games in manager", len(allGameIDs))
 
 		for _, gameID := range allGameIDs {
 			// Skip if this game is already ended
@@ -868,8 +882,10 @@ func (h *Hub) collectGamesInfo(filter string) []GameInfo {
 			// Get game statistics from game manager
 			stats := h.gameManager.GetGameStats(gameID)
 			if stats == nil {
+				log.Printf("🔍 No stats for game %s", gameID)
 				continue
 			}
+			log.Printf("🔍 Got stats for game %s - HasBoard: %t", gameID, stats["board"] != nil)
 
 			// Count spectators (clients in room who are not on a team)
 			spectators := 0
@@ -918,6 +934,9 @@ func (h *Hub) collectGamesInfo(filter string) []GameInfo {
 			}
 			if currentTurn, ok := stats["currentTurn"].(string); ok {
 				gameInfo.CurrentTurn = currentTurn
+			}
+			if board, ok := stats["board"].([][]string); ok {
+				gameInfo.Board = board
 			}
 
 			gamesList = append(gamesList, gameInfo)

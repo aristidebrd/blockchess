@@ -620,10 +620,6 @@ class GameService {
 
     // Start heartbeat
     startHeartbeat() {
-        // For now, simulate status updates
-        setInterval(() => {
-            wsService.requestGamesList();
-        }, 5000);
     }
 
     // Check if the current player has voted in this round

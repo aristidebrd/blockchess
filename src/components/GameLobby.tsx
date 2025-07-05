@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Play, Users, Clock, Crown, Eye, AlertTriangle, Swords, Trophy, Timer, Copy, ExternalLink, Filter, Vote, Coins } from 'lucide-react';
 import { useAccount } from 'wagmi';
-import { GameInfo, ChessPiece } from '../utils/chess';
+import { GameInfo, ChessPiece, initialBoard } from '../utils/chess';
 import { wsService } from '../services/websocket';
 import PlayerStatistics from './PlayerStatistics';
 
@@ -19,29 +19,8 @@ interface GameLobbyProps {
 
 // Compact board preview component
 const BoardPreview: React.FC<{ boardState?: (ChessPiece | null)[][], onClick?: () => void, isLarge?: boolean }> = ({ boardState, onClick, isLarge = false }) => {
-  if (!boardState) {
-    // Show initial board setup if no board state available
-    return (
-      <div
-        className={`grid grid-cols-8 gap-px bg-amber-900 p-1 rounded-lg border-2 border-amber-700 ${onClick ? 'cursor-pointer hover:border-amber-500 transition-colors' : ''} ${isLarge ? 'w-96 h-96' : 'w-32 h-32'}`}
-        onClick={onClick}
-      >
-        {Array.from({ length: 64 }).map((_, index) => {
-          const row = Math.floor(index / 8);
-          const col = index % 8;
-          const isLight = (row + col) % 2 === 0;
-
-          return (
-            <div
-              key={index}
-              className={`aspect-square ${isLight ? 'bg-amber-100' : 'bg-amber-800'} 
-                         rounded-sm flex items-center justify-center ${isLarge ? 'text-4xl' : 'text-xs'}`}
-            />
-          );
-        })}
-      </div>
-    );
-  }
+  // Use provided board state or fall back to initial board
+  const displayBoard = boardState || initialBoard;
 
   const getPieceSymbol = (piece: ChessPiece) => {
     const symbols = {
@@ -60,7 +39,7 @@ const BoardPreview: React.FC<{ boardState?: (ChessPiece | null)[][], onClick?: (
       className={`grid grid-cols-8 gap-px bg-amber-900 p-1 rounded-lg border-2 border-amber-700 ${onClick ? 'cursor-pointer hover:border-amber-500 transition-colors' : ''} ${isLarge ? 'w-96 h-96' : 'w-32 h-32'}`}
       onClick={onClick}
     >
-      {boardState.flat().map((piece, index) => {
+      {displayBoard.flat().map((piece, index) => {
         const row = Math.floor(index / 8);
         const col = index % 8;
         const isLight = (row + col) % 2 === 0;
@@ -795,18 +774,6 @@ const GameLobby: React.FC<GameLobbyProps> = ({ onJoinGame, onStartMatchmaking, o
                 </div>
               </div>
             </div>
-
-            {/* Player Statistics for Ended Games */}
-            {(selectedGameInfo.status === 'ended' || selectedGameInfo.status === 'completed') &&
-              (selectedGameInfo.whiteTeamPlayers || selectedGameInfo.blackTeamPlayers) && (
-                <div className="mb-8">
-                  <PlayerStatistics
-                    whiteTeamPlayers={selectedGameInfo.whiteTeamPlayers}
-                    blackTeamPlayers={selectedGameInfo.blackTeamPlayers}
-                    darkTheme={true}
-                  />
-                </div>
-              )}
 
             {/* Game Actions */}
             <div className="flex justify-center space-x-4">
