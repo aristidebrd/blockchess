@@ -54,7 +54,7 @@ if [ $? -eq 0 ]; then
         echo "📝 Updating environment files..."
         
         # Update contracts/.env
-        cat > .env << EOF
+        cat > backend/.env << EOF
 # Local Anvil Configuration for Development
 RPC_URL=http://127.0.0.1:8545
 CHAIN_ID=84532

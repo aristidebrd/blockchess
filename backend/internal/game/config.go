@@ -27,10 +27,8 @@ func NewConfigService() ConfigService {
 // LoadBlockchainConfig loads blockchain configuration from environment variables
 func (c *DefaultConfigService) LoadBlockchainConfig() (*BlockchainConfig, error) {
 	// Try to load .env.local first, then .env
-	if err := godotenv.Load(".env.local"); err != nil {
-		if err := godotenv.Load(".env"); err != nil {
-			// Continue without .env file - use system environment variables
-		}
+	if err := godotenv.Load(".env"); err != nil {
+		return nil, err
 	}
 
 	config := &BlockchainConfig{
