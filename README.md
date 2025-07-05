@@ -121,7 +121,75 @@ go build -o blockchess-server cmd/server/main.go
 
 The entire application (frontend + backend) will be served on http://localhost:8080
 
-## 📁 Project Structure
+## 💰 Credit USDC for Testing
+
+For testing the blockchain integration features, you'll need USDC tokens on your Anvil accounts. We provide a convenient script to credit your accounts with USDC from Base Sepolia.
+
+### Quick Start
+
+```bash
+# Start Anvil and credit accounts with 10,000 USDC each
+./credit_usdc.sh start
+
+# Check USDC balances
+./credit_usdc.sh balance
+
+# Stop Anvil when done
+./credit_usdc.sh stop
+```
+
+### Available Commands
+
+- `./credit_usdc.sh start` - Start Anvil with Base Sepolia fork and credit accounts
+- `./credit_usdc.sh balance` - Check current USDC balances
+- `./credit_usdc.sh deploy` - Deploy CreditUSDC contract (if Anvil is already running)
+- `./credit_usdc.sh status` - Check if Anvil is running and show balances
+- `./credit_usdc.sh stop` - Stop Anvil
+- `./credit_usdc.sh help` - Show help message
+
+### What the Script Does
+
+The script automatically:
+1. **Starts Anvil** with a Base Sepolia fork at `http://127.0.0.1:8545`
+2. **Deploys a credit contract** that transfers USDC from a whale account
+3. **Credits 10,000 USDC** to two default Anvil accounts:
+   - Account 1: `0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266`
+   - Account 2: `0x70997970C51812dc3A010C7d01b50e0d17dc79C8`
+
+### Adding USDC to MetaMask
+
+To see your USDC balance in MetaMask:
+
+1. **Connect MetaMask to Anvil**:
+   - Network Name: `Anvil Local`
+   - RPC URL: `http://127.0.0.1:8545`
+   - Chain ID: `31337`
+   - Currency Symbol: `ETH`
+
+2. **Import USDC Token**:
+   - Click "Import tokens" in MetaMask
+   - **Token Contract Address**: `0x036CbD53842c5426634e7929541eC2318f3dCF7e`
+   - **Token Symbol**: `USDC`
+   - **Token Decimals**: `6`
+
+3. **Import Anvil Account** (optional):
+   - Use the private key: `0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80`
+   - This corresponds to the first Anvil account that gets credited with USDC
+
+### Prerequisites for USDC Script
+
+Make sure you have these tools installed:
+- **Foundry** (anvil, forge, cast) - [Install here](https://getfoundry.sh/)
+- **bc** - For balance calculations: `sudo apt-get install bc`
+- **curl** - Usually pre-installed on most systems
+
+### Troubleshooting
+
+- **Script fails to start**: Make sure Foundry is installed and `anvil` is in your PATH
+- **No USDC showing**: Verify you've imported the correct token contract address in MetaMask
+- **Connection issues**: Ensure Anvil is running on port 8545 and MetaMask is connected to the right network
+
+## �� Project Structure
 
 ```
 blockchess/

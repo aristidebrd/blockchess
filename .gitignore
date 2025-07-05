@@ -27,6 +27,7 @@ dist-ssr
 backend/static/*
 backend/blockchess
 backend/blockchess-server
+backend/contracts/*
 
 contracts/out/**
 contracts/cache/**
@@ -34,6 +35,6 @@ contracts/lib/*
 contracts/broadcast/*
 contracts/artifacts/*
 contracts/build/*
+*.log
 cache/**
 broadcast/**
-*.log

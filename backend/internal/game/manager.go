@@ -3,6 +3,7 @@ package game
 import (
 	"fmt"
 	"log"
+	"math/big"
 	"strings"
 	"sync"
 	"time"
@@ -279,6 +280,9 @@ func (m *Manager) handleGameEnd(gameID string, gameStats map[string]any) {
 			if err := m.blockchainService.EndGame(gameID, blockchainResult); err != nil {
 				log.Printf("Error ending game %s on blockchain: %v", gameID, err)
 			}
+			if err := m.blockchainService.EndGameInVault(gameID, blockchainResult); err != nil {
+				log.Printf("Error ending game %s in vault: %v", gameID, err)
+			}
 		}()
 	}
 
@@ -378,6 +382,13 @@ func (m *Manager) VoteForMove(gameID, walletAddress, move string, team string) e
 			if err := m.blockchainService.RecordMove(gameID, player, 31337); err != nil {
 				log.Printf("Error recording move on blockchain: %v", err)
 			}
+			log.Printf("Recorded move on blockchain for player %s in game %s", walletAddress, gameID)
+			// Stake money in vault when voting
+			stakeAmount := big.NewInt(10000000000000000) // 0.01 ETH in wei
+			if err := m.blockchainService.StakeOnVote(gameID, player, stakeAmount); err != nil {
+				log.Printf("Error staking on vote for player %s: %v", walletAddress, err)
+			}
+			log.Printf("Staked on vote for player %s in game %s", walletAddress, gameID)
 		}()
 	}
 

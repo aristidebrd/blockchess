@@ -32,10 +32,11 @@ func (c *DefaultConfigService) LoadBlockchainConfig() (*BlockchainConfig, error)
 	}
 
 	config := &BlockchainConfig{
-		RPCUrl:              c.GetEnv("RPC_URL", "http://127.0.0.1:8545"),
-		PrivateKey:          c.GetEnv("PRIVATE_KEY", ""),
-		GameContractAddress: c.GetEnv("GAME_CONTRACT_ADDRESS", ""),
-		DefaultStakeETH:     c.GetEnv("DEFAULT_STAKE_ETH", "0.01"),
+		RPCUrl:               c.GetEnv("RPC_URL", "http://127.0.0.1:8545"),
+		PrivateKey:           c.GetEnv("PRIVATE_KEY", ""),
+		GameContractAddress:  c.GetEnv("GAME_CONTRACT_ADDRESS", ""),
+		VaultContractAddress: c.GetEnv("VAULT_CONTRACT_ADDRESS", ""),
+		DefaultStakeETH:      c.GetEnv("DEFAULT_STAKE_ETH", "0.01"),
 	}
 
 	// Validate required fields
@@ -44,6 +45,9 @@ func (c *DefaultConfigService) LoadBlockchainConfig() (*BlockchainConfig, error)
 	}
 	if config.GameContractAddress == "" {
 		return nil, fmt.Errorf("GAME_CONTRACT_ADDRESS environment variable not set")
+	}
+	if config.VaultContractAddress == "" {
+		return nil, fmt.Errorf("VAULT_CONTRACT_ADDRESS environment variable not set")
 	}
 
 	return config, nil
@@ -88,10 +92,11 @@ func NewMockConfigService(env map[string]string) ConfigService {
 
 func (m *MockConfigService) LoadBlockchainConfig() (*BlockchainConfig, error) {
 	return &BlockchainConfig{
-		RPCUrl:              m.GetEnv("RPC_URL", "http://127.0.0.1:8545"),
-		PrivateKey:          m.GetEnv("PRIVATE_KEY", "test_private_key"),
-		GameContractAddress: m.GetEnv("GAME_CONTRACT_ADDRESS", "0x1234567890123456789012345678901234567890"),
-		DefaultStakeETH:     m.GetEnv("DEFAULT_STAKE_ETH", "0.01"),
+		RPCUrl:               m.GetEnv("RPC_URL", "http://127.0.0.1:8545"),
+		PrivateKey:           m.GetEnv("PRIVATE_KEY", "test_private_key"),
+		GameContractAddress:  m.GetEnv("GAME_CONTRACT_ADDRESS", "0x1234567890123456789012345678901234567890"),
+		VaultContractAddress: m.GetEnv("VAULT_CONTRACT_ADDRESS", "0x1234567890123456789012345678901234567890"),
+		DefaultStakeETH:      m.GetEnv("DEFAULT_STAKE_ETH", "0.01"),
 	}, nil
 }
 

@@ -2,6 +2,7 @@ package game
 
 import (
 	"blockchess/contracts/gamecontract"
+	"blockchess/contracts/vaultcontract"
 	"context"
 	"crypto/ecdsa"
 	"fmt"
@@ -23,6 +24,9 @@ type BlockchainService interface {
 	EndGame(gameID string, result GameResult) error
 	IsConnected() bool
 	GetGameInfo(gameID string) (*GameInfo, error)
+	CalculateRewards(gameID string, player common.Address, playerTotalStakes *big.Int) (*big.Int, error)
+	StakeOnVote(gameID string, player common.Address, stakeAmount *big.Int) error
+	EndGameInVault(gameID string, result GameResult) error
 }
 
 // GameResult represents the outcome of a game
@@ -51,20 +55,23 @@ type GameInfo struct {
 
 // EthereumBlockchainService implements BlockchainService for Ethereum
 type EthereumBlockchainService struct {
-	client           bind.ContractBackend
-	gameContract     *gamecontract.Gamecontract
-	gameContractAddr common.Address
-	auth             *bind.TransactOpts
-	privateKey       *ecdsa.PrivateKey
-	defaultStakeWei  *big.Int
+	client            bind.ContractBackend
+	gameContract      *gamecontract.Gamecontract
+	gameContractAddr  common.Address
+	vaultContract     *vaultcontract.Vaultcontract
+	vaultContractAddr common.Address
+	auth              *bind.TransactOpts
+	privateKey        *ecdsa.PrivateKey
+	defaultStakeWei   *big.Int
 }
 
 // BlockchainConfig holds blockchain configuration
 type BlockchainConfig struct {
-	RPCUrl              string
-	PrivateKey          string
-	GameContractAddress string
-	DefaultStakeETH     string
+	RPCUrl               string
+	PrivateKey           string
+	GameContractAddress  string
+	VaultContractAddress string
+	DefaultStakeETH      string
 }
 
 // NewEthereumBlockchainService creates a new Ethereum blockchain service
@@ -117,17 +124,27 @@ func NewEthereumBlockchainService(config *BlockchainConfig) (*EthereumBlockchain
 		return nil, fmt.Errorf("failed to create game contract instance: %v", err)
 	}
 
+	// Create vault contract instance
+	vaultContractAddr := common.HexToAddress(config.VaultContractAddress)
+	vaultContract, err := vaultcontract.NewVaultcontract(vaultContractAddr, client)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create vault contract instance: %v", err)
+	}
+
 	service := &EthereumBlockchainService{
-		client:           client,
-		gameContract:     gameContract,
-		gameContractAddr: gameContractAddr,
-		auth:             auth,
-		privateKey:       privateKey,
-		defaultStakeWei:  defaultStakeWei,
+		client:            client,
+		gameContract:      gameContract,
+		gameContractAddr:  gameContractAddr,
+		vaultContract:     vaultContract,
+		vaultContractAddr: vaultContractAddr,
+		auth:              auth,
+		privateKey:        privateKey,
+		defaultStakeWei:   defaultStakeWei,
 	}
 
 	log.Printf("Blockchain service initialized successfully")
 	log.Printf("Game Contract: %s", gameContractAddr.Hex())
+	log.Printf("Vault Contract: %s", vaultContractAddr.Hex())
 	log.Printf("Default Stake: %s Wei (%s ETH)", defaultStakeWei.String(), config.DefaultStakeETH)
 
 	return service, nil
@@ -254,6 +271,82 @@ func (s *EthereumBlockchainService) GetGameInfo(gameID string) (*GameInfo, error
 	}, nil
 }
 
+// StakeOnVote stakes money in the vault when a player votes
+func (s *EthereumBlockchainService) StakeOnVote(gameID string, player common.Address, stakeAmount *big.Int) error {
+	gameIDInt, err := s.parseGameID(gameID)
+	if err != nil {
+		return fmt.Errorf("invalid game ID: %v", err)
+	}
+
+	// Use default stake amount if not provided
+	if stakeAmount == nil {
+		stakeAmount = s.defaultStakeWei
+	}
+
+	// Create a new auth instance for the player transaction
+	// Note: In a real implementation, this would need to be signed by the player
+	// For now, we'll use the backend's auth but set the value to stake
+	auth := *s.auth
+	auth.Value = stakeAmount
+
+	// Get fresh nonce
+	nonce, err := s.client.PendingNonceAt(context.Background(), s.auth.From)
+	if err != nil {
+		return fmt.Errorf("failed to get nonce: %v", err)
+	}
+	auth.Nonce = big.NewInt(int64(nonce))
+
+	// Stake on vault contract
+	tx, err := s.vaultContract.Stake(&auth, big.NewInt(int64(gameIDInt)), stakeAmount)
+	if err != nil {
+		return fmt.Errorf("failed to stake on vault: %v", err)
+	}
+
+	log.Printf("Stake deposited for game %s, player %s, on vault %s amount %s! Transaction: %s",
+		gameID, player.Hex(), s.vaultContractAddr.Hex(), stakeAmount.String(), tx.Hash().Hex())
+	return nil
+}
+
+// EndGameInVault ends a game in the vault contract
+func (s *EthereumBlockchainService) EndGameInVault(gameID string, result GameResult) error {
+	gameIDInt, err := s.parseGameID(gameID)
+	if err != nil {
+		return fmt.Errorf("invalid game ID: %v", err)
+	}
+
+	// Get fresh nonce
+	nonce, err := s.client.PendingNonceAt(context.Background(), s.auth.From)
+	if err != nil {
+		return fmt.Errorf("failed to get nonce: %v", err)
+	}
+	s.auth.Nonce = big.NewInt(int64(nonce))
+
+	// End game in vault contract
+	tx, err := s.vaultContract.EndGame(s.auth, big.NewInt(int64(gameIDInt)), uint8(result))
+	if err != nil {
+		return fmt.Errorf("failed to end game in vault: %v", err)
+	}
+
+	log.Printf("Game %s ended in vault with result %d! Transaction: %s", gameID, result, tx.Hash().Hex())
+	return nil
+}
+
+// CalculateRewards calculates rewards for a player
+func (s *EthereumBlockchainService) CalculateRewards(gameID string, player common.Address, playerTotalStakes *big.Int) (*big.Int, error) {
+	gameIDInt, err := s.parseGameID(gameID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid game ID: %v", err)
+	}
+
+	// Calculate rewards using the game contract
+	rewards, err := s.gameContract.CalculateRewards(nil, big.NewInt(int64(gameIDInt)), player, playerTotalStakes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to calculate rewards: %v", err)
+	}
+
+	return rewards, nil
+}
+
 // parseGameID extracts the numeric ID from a game ID string
 func (s *EthereumBlockchainService) parseGameID(gameID string) (uint64, error) {
 	if strings.HasPrefix(gameID, "game-") {
@@ -330,4 +423,29 @@ func (m *MockBlockchainService) GetGameInfo(gameID string) (*GameInfo, error) {
 	}
 
 	return nil, fmt.Errorf("game not found")
+}
+
+func (m *MockBlockchainService) StakeOnVote(gameID string, player common.Address, stakeAmount *big.Int) error {
+	if !m.connected {
+		return fmt.Errorf("blockchain service not connected")
+	}
+	log.Printf("Mock: Stake deposited for game %s, player %s, amount %s", gameID, player.Hex(), stakeAmount.String())
+	return nil
+}
+
+func (m *MockBlockchainService) EndGameInVault(gameID string, result GameResult) error {
+	if !m.connected {
+		return fmt.Errorf("blockchain service not connected")
+	}
+	log.Printf("Mock: Game %s ended in vault with result %d", gameID, result)
+	return nil
+}
+
+func (m *MockBlockchainService) CalculateRewards(gameID string, player common.Address, playerTotalStakes *big.Int) (*big.Int, error) {
+	if !m.connected {
+		return nil, fmt.Errorf("blockchain service not connected")
+	}
+	// Mock calculation: return the player's total stakes as rewards
+	log.Printf("Mock: Calculating rewards for game %s, player %s", gameID, player.Hex())
+	return playerTotalStakes, nil
 }
