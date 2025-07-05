@@ -3,7 +3,6 @@ import { Play, Users, Clock, Crown, Eye, AlertTriangle, Swords, Trophy, Timer, C
 import { useAccount } from 'wagmi';
 import { GameInfo, ChessPiece, initialBoard } from '../utils/chess';
 import { wsService } from '../services/websocket';
-import PlayerStatistics from './PlayerStatistics';
 
 interface GameLobbyProps {
   onJoinGame: (gameId: string, side?: 'white' | 'black' | 'spectator') => void;
@@ -99,14 +98,6 @@ const GameLobby: React.FC<GameLobbyProps> = ({ onJoinGame, onStartMatchmaking, o
     if (onFilterChange) {
       onFilterChange(filter);
     }
-  };
-
-  const canJoinAsPlayer = (game: GameInfo, playerAddress?: string): boolean => {
-    if (game.status !== 'waiting' && game.gameStartTime) {
-      const gameAge = Date.now() - game.gameStartTime.getTime();
-      return gameAge <= 7 * 60 * 1000; // 7 minutes in milliseconds
-    }
-    return game.status === 'waiting';
   };
 
   const [playerStatusCache, setPlayerStatusCache] = useState<Record<string, { team: string; gameId: string }>>({});
@@ -458,7 +449,6 @@ const GameLobby: React.FC<GameLobbyProps> = ({ onJoinGame, onStartMatchmaking, o
       {/* Games Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
         {games.map((game) => {
-          const canJoin = canJoinAsPlayer(game, address);
           const gameAge = getGameAgeMinutes(game);
           const isTooOld = gameAge > 7 && game.status === 'active';
 
