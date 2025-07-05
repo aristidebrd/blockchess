@@ -86,10 +86,16 @@ export interface PlayerStatus {
     team: string; // 'white', 'black', or '' if not in game
 }
 
-export type ServerMessage = VoteUpdate | MoveResult | TimerTick | MatchFound | GamesList | GamesListUpdate | TotalNumberOfPlayers | ClientConnected | ErrorMessage | PlayerStatus;
+export interface ValidMovesResponse {
+    type: 'valid_moves_response';
+    gameId: string;
+    validMoves: string[];
+}
+
+export type ServerMessage = VoteUpdate | MoveResult | TimerTick | MatchFound | GamesList | GamesListUpdate | TotalNumberOfPlayers | ClientConnected | ErrorMessage | PlayerStatus | ValidMovesResponse;
 
 export interface ClientMessage {
-    type: 'join_game' | 'vote_move' | 'join_team' | 'watch_game' | 'join_matchmaking' | 'leave_matchmaking' | 'request_games_list' | 'request_filtered_games_list' | 'check_player_status';
+    type: 'join_game' | 'vote_move' | 'join_team' | 'watch_game' | 'join_matchmaking' | 'leave_matchmaking' | 'request_games_list' | 'request_filtered_games_list' | 'check_player_status' | 'get_valid_moves';
     gameId?: string;
     move?: string;
     team?: 'white' | 'black';
@@ -268,6 +274,14 @@ export class WebSocketService {
         });
     }
 
+    // Request valid moves for a game
+    getValidMoves(gameId: string): void {
+        this.send({
+            type: 'get_valid_moves',
+            gameId: gameId
+        });
+    }
+
     public on(type: string, callback: (data: any) => void): () => void {
         if (!this.listeners.has(type)) {
             this.listeners.set(type, new Set());
@@ -283,7 +297,8 @@ export class WebSocketService {
         };
     }
 
-    public disconnect() {
+    // Disconnect from WebSocket
+    disconnect(): void {
         if (this.ws) {
             this.ws.close();
             this.ws = null;

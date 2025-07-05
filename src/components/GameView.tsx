@@ -112,7 +112,12 @@ const GameView: React.FC<GameViewProps> = ({
 
     // Handle move creation
     const handleCreateMove = async (from: string, to: string) => {
-        const result = await gameService.createMove(from, to, gameState.board);
+        if (!backendGameState || !backendGameState.boardState) {
+            alert('Game not ready for move creation');
+            return;
+        }
+
+        const result = await gameService.createMove(from, to, backendGameState.boardState);
 
         if (result.success) {
             setShowMoveConfirm(true);
@@ -171,7 +176,7 @@ const GameView: React.FC<GameViewProps> = ({
                             {/* Left column - Chess board and voting panel */}
                             <div className="lg:col-span-2 space-y-6">
                                 <ChessBoard
-                                    gameState={gameState}
+                                    gameState={backendGameState}
                                     onCreateMove={handleCreateMove}
                                     isInteractive={true}
                                     playerSide={playerRole}

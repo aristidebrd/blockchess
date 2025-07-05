@@ -29,6 +29,8 @@ const (
 	TypeRequestFilteredGamesList = "request_filtered_games_list"
 	TypeCheckPlayerStatus        = "check_player_status"
 	TypePlayerStatus             = "player_status"
+	TypeGetValidMoves            = "get_valid_moves"
+	TypeValidMovesResponse       = "valid_moves_response"
 	TypeError                    = "error"
 )
 
@@ -70,8 +72,9 @@ type Message struct {
 	Board            [][]string     `json:"board,omitempty"`
 	GamesList        []GameInfo     `json:"gamesList,omitempty"`
 	TotalConnections int            `json:"totalConnections,omitempty"`
-	Filter           string         `json:"filter,omitempty"` // "active", "ended", or "" for all
-	Error            string         `json:"error,omitempty"`  // Error message
+	Filter           string         `json:"filter,omitempty"`     // "active", "ended", or "" for all
+	Error            string         `json:"error,omitempty"`      // Error message
+	ValidMoves       []string       `json:"validMoves,omitempty"` // List of valid moves in coordinate notation
 
 	// Game statistics
 	WhitePlayers          int             `json:"whitePlayers,omitempty"`
@@ -507,6 +510,37 @@ func (h *Hub) handleMessage(msg *Message, client *Client) {
 
 		// Send status back to the requesting client
 		if data, err := json.Marshal(statusMsg); err == nil {
+			select {
+			case client.send <- data:
+			default:
+			}
+		}
+
+	case TypeGetValidMoves:
+		log.Printf("Player %s requesting valid moves for game %s", client.id, msg.GameID)
+
+		// Check if game exists
+		game := h.gameManager.GetGame(msg.GameID)
+		if game == nil {
+			log.Printf("Game %s does not exist, cannot get valid moves", msg.GameID)
+			h.sendErrorToClient(client, "Game does not exist")
+			return
+		}
+
+		// Get valid moves from the game manager (already in coordinate notation)
+		validMoves := h.gameManager.GetValidMoves(msg.GameID)
+		if validMoves == nil {
+			validMoves = []string{} // Ensure we send an empty array instead of null
+		}
+
+		validMovesMsg := &Message{
+			Type:       TypeValidMovesResponse,
+			GameID:     msg.GameID,
+			ValidMoves: validMoves,
+		}
+
+		// Send valid moves back to the requesting client
+		if data, err := json.Marshal(validMovesMsg); err == nil {
 			select {
 			case client.send <- data:
 			default:

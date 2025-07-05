@@ -1,6 +1,6 @@
 // Game service to communicate with Go backend
 import { wsService } from './websocket';
-import { GameInfo, ChessPiece, GameEndInfo } from '../utils/chess';
+import { GameInfo, ChessPiece, GameEndInfo, PieceColor } from '../utils/chess';
 
 // New interfaces for game engine
 export interface PendingMove {
@@ -236,6 +236,9 @@ class GameService {
 
         this.currentGameState = initialState;
 
+        // Collect initial game data
+        await this.collectTurnData(gameId);
+
         // Set up WebSocket subscriptions for this game
         const unsubError = wsService.on('error', (data) => {
             if (data.error && data.error.includes('Game does not exist')) {
@@ -290,6 +293,9 @@ class GameService {
                 this.currentGameState.turnStartTime = Date.now();
 
                 this.notifyGameStateUpdate();
+
+                // Collect data for the new turn
+                this.collectTurnData(gameId);
             }
         });
 
@@ -345,6 +351,33 @@ class GameService {
             unsubMove();
             unsubGameEnd();
         });
+    }
+
+    // Collect all necessary data for the current turn
+    private async collectTurnData(gameId: string): Promise<void> {
+        if (!this.currentGameState || this.currentGameId !== gameId) {
+            return;
+        }
+
+        try {
+            // Get valid moves from backend
+            const validMoves = await this.getValidMoves(gameId);
+
+            // Store valid moves in the game state for easy access
+            (this.currentGameState as any).validMoves = validMoves;
+
+            console.log(`🎯 Collected turn data for ${gameId}:`, {
+                currentTurn: this.currentGameState.currentTurn,
+                currentMove: this.currentGameState.currentMove,
+                validMovesCount: validMoves.length,
+                hasBoardState: !!this.currentGameState.boardState
+            });
+
+            // Notify components that new turn data is available
+            this.notifyGameStateUpdate();
+        } catch (error) {
+            console.error('Error collecting turn data:', error);
+        }
     }
 
     // Subscribe to game state updates
@@ -420,6 +453,12 @@ class GameService {
         // Check if player has already voted this round
         if (this.hasPlayerVoted(this.currentGameId)) {
             return { success: false, error: 'You have already voted this round' };
+        }
+
+        // Check if this looks like a castling move and provide helpful feedback
+        if (this.isCastlingMove(moveId)) {
+            console.log('🏰 Castling move detected:', moveId);
+            console.log('🏰 Note: Backend will validate all castling rules including king check history');
         }
 
         try {
@@ -560,10 +599,18 @@ class GameService {
         );
     }
 
-    // Get current player role for the active game
+    // Get the current player role for the active game
     getCurrentPlayerRole(): 'white' | 'black' | 'spectator' | 'none' {
         if (!this.currentGameId) return 'none';
         return this.playerRoles.get(this.currentGameId) || 'none';
+    }
+
+    // Get current valid moves for the active game
+    getCurrentValidMoves(): string[] {
+        if (!this.currentGameState || !this.currentGameState.validMoves) {
+            return [];
+        }
+        return this.currentGameState.validMoves;
     }
 
     // Cleanup game
@@ -639,14 +686,34 @@ class GameService {
 
         // Black pieces
         for (let i = 0; i < 8; i++) {
-            board[0][i] = { type: pieceOrder[i], color: 'black', position: String.fromCharCode(97 + i) + '8' };
-            board[1][i] = { type: 'pawn', color: 'black', position: String.fromCharCode(97 + i) + '7' };
+            const piece: ChessPiece = {
+                type: pieceOrder[i],
+                color: 'black' as PieceColor,
+                position: String.fromCharCode(97 + i) + '8',
+                hasMoved: false
+            };
+            // Add hasBeenChecked property for kings
+            if (piece.type === 'king') {
+                piece.hasBeenChecked = false;
+            }
+            board[0][i] = piece;
+            board[1][i] = { type: 'pawn', color: 'black' as PieceColor, position: String.fromCharCode(97 + i) + '7', hasMoved: false };
         }
 
         // White pieces
         for (let i = 0; i < 8; i++) {
-            board[7][i] = { type: pieceOrder[i], color: 'white', position: String.fromCharCode(97 + i) + '1' };
-            board[6][i] = { type: 'pawn', color: 'white', position: String.fromCharCode(97 + i) + '2' };
+            const piece: ChessPiece = {
+                type: pieceOrder[i],
+                color: 'white' as PieceColor,
+                position: String.fromCharCode(97 + i) + '1',
+                hasMoved: false
+            };
+            // Add hasBeenChecked property for kings
+            if (piece.type === 'king') {
+                piece.hasBeenChecked = false;
+            }
+            board[7][i] = piece;
+            board[6][i] = { type: 'pawn', color: 'white' as PieceColor, position: String.fromCharCode(97 + i) + '2', hasMoved: false };
         }
 
         return board;
@@ -687,7 +754,8 @@ class GameService {
         return this.playerId;
     }
 
-    private convertBackendBoardToFrontend(board: string[][]): (ChessPiece | null)[][] {
+    // Convert backend board format to frontend format (public method for reuse)
+    public convertBackendBoardToFrontend(board: string[][]): (ChessPiece | null)[][] {
         const pieceMap: Record<string, { type: ChessPiece['type'], color: ChessPiece['color'] }> = {
             'P': { type: 'pawn', color: 'white' },
             'R': { type: 'rook', color: 'white' },
@@ -718,14 +786,63 @@ class GameService {
                 const file = String.fromCharCode(97 + colIndex); // a, b, c, ...
                 const rank = (8 - rowIndex).toString(); // 8, 7, 6, ...
 
-                return {
+                const piece: ChessPiece = {
                     type: pieceInfo.type,
                     color: pieceInfo.color,
                     position: file + rank,
-                    hasMoved: false
+                    hasMoved: false // Backend should provide this information, but for now default to false
                 };
+
+                // Add hasBeenChecked property for kings
+                if (piece.type === 'king') {
+                    piece.hasBeenChecked = false; // Backend should provide this information
+                }
+
+                return piece;
             })
         );
+    }
+
+    // Get valid moves from backend (for proper castling validation)
+    async getValidMoves(gameId: string): Promise<string[]> {
+        if (!this.currentGameId || this.currentGameId !== gameId) {
+            return [];
+        }
+
+        return new Promise((resolve) => {
+            // Set up listener for the response
+            const unsubscribe = wsService.on('valid_moves_response', (data: any) => {
+                if (data.gameId === gameId) {
+                    unsubscribe();
+                    resolve(data.validMoves || []);
+                }
+            });
+
+            // Send the request
+            wsService.getValidMoves(gameId);
+
+            // Set a timeout to resolve with empty array if no response in 3 seconds
+            setTimeout(() => {
+                unsubscribe();
+                resolve([]);
+            }, 3000);
+        });
+    }
+
+
+
+    // Helper to check if a move is a castling move
+    private isCastlingMove(moveId: string): boolean {
+        const from = moveId.substring(0, 2);
+        const to = moveId.substring(2, 4);
+
+        // Simple check for castling moves based on king movement pattern
+        // Kingside castling: e1g1 or e8g8
+        // Queenside castling: e1c1 or e8c8
+        const isCastling = (from === 'e1' && (to === 'g1' || to === 'c1')) ||
+            (from === 'e8' && (to === 'g8' || to === 'c8'));
+
+        return isCastling;
     }
 }
 

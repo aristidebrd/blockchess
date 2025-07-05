@@ -458,7 +458,7 @@ func parseSquare(square string) chess.Square {
 	return chess.Square(squareIndex)
 }
 
-// GetValidMoves returns all valid moves for the current position
+// GetValidMoves returns all valid moves for the current position in coordinate notation
 func (m *Manager) GetValidMoves(gameID string) []string {
 	m.mu.RLock()
 	game, exists := m.games[gameID]
@@ -474,7 +474,10 @@ func (m *Manager) GetValidMoves(gameID string) []string {
 	moves := game.Game.ValidMoves()
 	moveStrings := make([]string, len(moves))
 	for i, move := range moves {
-		moveStrings[i] = move.String()
+		// Convert to coordinate notation (e.g., "e2e4" instead of "e4")
+		from := move.S1().String()
+		to := move.S2().String()
+		moveStrings[i] = from + to
 	}
 
 	return moveStrings

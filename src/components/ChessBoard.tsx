@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
-import { ChessPiece, GameState, Move, pieceSymbols, coordsToSquare, squareToCoords, calculatePossibleMoves } from '../utils/chess';
+import React, { useState, useEffect } from 'react';
+import { ChessPiece, GameInfo, pieceSymbols, coordsToSquare, squareToCoords } from '../utils/chess';
 
 interface ChessBoardProps {
-  gameState: GameState;
+  gameState: GameInfo;
   highlightedSquares?: string[];
   onCreateMove?: (from: string, to: string) => void;
   isInteractive?: boolean;
@@ -22,6 +22,15 @@ const ChessBoard: React.FC<ChessBoardProps> = ({
   const [possibleMoves, setPossibleMoves] = useState<string[]>([]);
   const [draggedPiece, setDraggedPiece] = useState<string | null>(null);
 
+  // Get valid moves from game state
+  const validMoves = gameState.validMoves || [];
+
+  // Clear selection when game state changes (new turn, etc.)
+  useEffect(() => {
+    setSelectedSquare(null);
+    setPossibleMoves([]);
+  }, [gameState.currentTurn, gameState.currentMove]);
+
   const handleSquareClick = (square: string) => {
     if (!isInteractive) return;
 
@@ -37,25 +46,31 @@ const ChessBoard: React.FC<ChessBoardProps> = ({
         onCreateMove?.(selectedSquare, square);
         setSelectedSquare(null);
         setPossibleMoves([]);
-      } else if (piece && piece.color === gameState.currentPlayer) {
+      } else if (piece && piece.color === gameState.currentTurn) {
         // Select new piece
         setSelectedSquare(square);
-        setPossibleMoves(calculatePossibleMoves(square, piece, gameState.board));
+        // Filter valid moves for this piece
+        const pieceMoves = validMoves.filter(move => move.startsWith(square));
+        setPossibleMoves(pieceMoves.map(move => move.substring(2, 4)));
       } else {
         // Invalid move
         setSelectedSquare(null);
         setPossibleMoves([]);
       }
-    } else if (piece && piece.color === gameState.currentPlayer) {
+    } else if (piece && piece.color === gameState.currentTurn) {
       // Select piece
       setSelectedSquare(square);
-      setPossibleMoves(calculatePossibleMoves(square, piece, gameState.board));
+      // Filter valid moves for this piece
+      const pieceMoves = validMoves.filter(move => move.startsWith(square));
+      const possibleDestinations = pieceMoves.map(move => move.substring(2, 4));
+
+      setPossibleMoves(possibleDestinations);
     }
   };
 
   const getPieceAtSquare = (square: string): ChessPiece | null => {
     const [row, col] = squareToCoords(square);
-    return gameState.board[row][col];
+    return gameState.boardState ? gameState.boardState[row][col] : null;
   };
 
 
@@ -63,7 +78,7 @@ const ChessBoard: React.FC<ChessBoardProps> = ({
   const canDragPiece = (piece: ChessPiece | null): boolean => {
     if (!isInteractive || !piece || hasVoted) return false;
     if (playerSide === 'spectator' || playerSide === 'none') return false;
-    return piece.color === gameState.currentPlayer && piece.color === playerSide;
+    return piece.color === gameState.currentTurn && piece.color === playerSide;
   };
 
   const handleDragStart = (e: React.DragEvent, position: string) => {
@@ -75,7 +90,11 @@ const ChessBoard: React.FC<ChessBoardProps> = ({
 
     setDraggedPiece(position);
     setSelectedSquare(position);
-    setPossibleMoves(calculatePossibleMoves(position, piece!, gameState.board));
+    // Filter valid moves for this piece
+    const pieceMoves = validMoves.filter(move => move.startsWith(position));
+    const possibleDestinations = pieceMoves.map(move => move.substring(2, 4));
+
+    setPossibleMoves(possibleDestinations);
     e.dataTransfer.effectAllowed = 'move';
   };
 
@@ -108,12 +127,12 @@ const ChessBoard: React.FC<ChessBoardProps> = ({
 
     const isLight = (displayRow + displayCol) % 2 === 0;
     const square = coordsToSquare(row, col);
-    const piece = gameState.board[row][col];
+    const piece = gameState.boardState ? gameState.boardState[row][col] : null;
     const isHighlighted = highlightedSquares.includes(square);
     const isSelected = selectedSquare === square;
     const isPossibleMove = possibleMoves.includes(square);
-    const isLastMove = gameState.lastMove &&
-      (gameState.lastMove.from === square || gameState.lastMove.to === square);
+    const isLastMove = gameState.lastExecutedMove &&
+      (gameState.lastExecutedMove.from === square || gameState.lastExecutedMove.to === square);
     const isValidMove = isPossibleMove && !piece;
 
     return (
@@ -165,18 +184,31 @@ const ChessBoard: React.FC<ChessBoardProps> = ({
     );
   };
 
+  // Return empty board if no board state
+  if (!gameState.boardState) {
+    return (
+      <div className="bg-gradient-to-br from-amber-50 to-amber-200 p-4 rounded-xl shadow-2xl">
+        <div className="grid grid-cols-8 gap-0 border-4 border-amber-900 rounded-lg overflow-hidden">
+          {Array(64).fill(null).map((_, index) => (
+            <div key={index} className="aspect-square bg-amber-100" />
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="bg-gradient-to-br from-amber-50 to-amber-200 p-4 rounded-xl shadow-2xl">
       <div className="grid grid-cols-8 gap-0 border-4 border-amber-900 rounded-lg overflow-hidden">
         {(playerSide === 'black'
-          ? gameState.board.slice().reverse().map((row, reversedRowIndex) =>
+          ? gameState.boardState.slice().reverse().map((row, reversedRowIndex) =>
             row.slice().reverse().map((_, reversedColIndex) => {
               const originalRow = 7 - reversedRowIndex;
               const originalCol = 7 - reversedColIndex;
               return renderSquare(originalRow, originalCol);
             })
           ).flat()
-          : gameState.board.map((row, rowIndex) =>
+          : gameState.boardState.map((row, rowIndex) =>
             row.map((_, colIndex) => renderSquare(rowIndex, colIndex))
           ).flat()
         )}
