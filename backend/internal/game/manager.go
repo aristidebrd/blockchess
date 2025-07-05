@@ -151,6 +151,18 @@ func (m *Manager) GetOrCreateGame(gameID string) *GameState {
 	return game
 }
 
+// GetGame retrieves an existing game without creating it
+func (m *Manager) GetGame(gameID string) *GameState {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	if game, exists := m.games[gameID]; exists {
+		return game
+	}
+
+	return nil
+}
+
 // createGameOnBlockchain creates a game on the blockchain asynchronously
 func (m *Manager) createGameOnBlockchain(gameID string) {
 	if err := m.blockchainService.CreateGame(gameID, nil); err != nil {

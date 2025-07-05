@@ -29,6 +29,7 @@ class GameService {
     private gameStateCallbacks: Map<string, (state: GameInfo) => void> = new Map();
     private activeGameCleanups: Map<string, () => void> = new Map();
     private gameEndCallbacks: Map<string, (gameEndInfo: GameEndInfo) => void> = new Map();
+    private gameNotFoundCallbacks: ((gameId: string) => void)[] = [];
 
     // Game engine state
     private pendingMove: PendingMove | null = null;
@@ -236,6 +237,14 @@ class GameService {
         this.currentGameState = initialState;
 
         // Set up WebSocket subscriptions for this game
+        const unsubError = wsService.on('error', (data) => {
+            if (data.error && data.error.includes('Game does not exist')) {
+                console.error('Game does not exist:', gameId);
+                // Trigger game not found state instead of redirecting
+                this.triggerGameNotFound(gameId);
+            }
+        });
+
         const unsubVotes = wsService.on('vote_update', (data) => {
             if (this.currentGameState && data.gameId === this.currentGameId) {
                 this.currentGameState.proposedMoves = Object.entries(data.votes || {}).map(([move, votes]) => ({
@@ -330,6 +339,7 @@ class GameService {
 
         // Store cleanup function
         this.activeGameCleanups.set(gameId, () => {
+            unsubError();
             unsubVotes();
             unsubTimer();
             unsubMove();
@@ -362,6 +372,30 @@ class GameService {
         return () => {
             this.gameEndCallbacks.delete(callbackId);
         };
+    }
+
+    // Subscribe to game not found events
+    onGameNotFound(callback: (gameId: string) => void): () => void {
+        this.gameNotFoundCallbacks.push(callback);
+
+        // Return unsubscribe function
+        return () => {
+            const index = this.gameNotFoundCallbacks.indexOf(callback);
+            if (index > -1) {
+                this.gameNotFoundCallbacks.splice(index, 1);
+            }
+        };
+    }
+
+    // Trigger game not found callbacks
+    private triggerGameNotFound(gameId: string): void {
+        this.gameNotFoundCallbacks.forEach(callback => {
+            try {
+                callback(gameId);
+            } catch (error) {
+                console.error('Error in game not found callback:', error);
+            }
+        });
     }
 
     // Vote on a move (main game engine method)

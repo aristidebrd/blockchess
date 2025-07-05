@@ -4,11 +4,12 @@ import { useAccount } from 'wagmi';
 import WalletConnect from './components/WalletConnect';
 import GameLobby from './components/GameLobby';
 import GameView from './components/GameView';
+import GameNotFound from './components/GameNotFound';
 import { GameInfo, ChessPiece } from './utils/chess';
 import { wsService } from './services/websocket';
 import { gameService } from './services/gameService';
 
-type AppView = 'lobby' | 'game';
+type AppView = 'lobby' | 'game' | 'game-not-found';
 
 function App() {
   const { isConnected, address } = useAccount();
@@ -18,6 +19,7 @@ function App() {
   const [currentGameId, setCurrentGameId] = useState<string | null>(null);
   const [playerRole, setPlayerRole] = useState<'white' | 'black' | 'spectator' | 'none'>('none');
   const [isFromMatchmaking, setIsFromMatchmaking] = useState<boolean>(false);
+  const [gameNotFoundId, setGameNotFoundId] = useState<string | null>(null);
 
   // Games list state
   const [games, setGames] = useState<GameInfo[]>([]);
@@ -195,6 +197,20 @@ function App() {
       gameService.setWalletAddress(null);
     }
   }, [isConnected, address]);
+
+  // Set up game not found callback
+  useEffect(() => {
+    const unsubscribe = gameService.onGameNotFound((gameId: string) => {
+      console.log('Game not found:', gameId);
+      setGameNotFoundId(gameId);
+      setCurrentView('game-not-found');
+      setCurrentGameId(null);
+      setPlayerRole('none');
+      setIsFromMatchmaking(false);
+    });
+
+    return unsubscribe;
+  }, []);
 
   // Function to request games list based on current filter
   const requestGamesList = () => {
@@ -412,6 +428,7 @@ function App() {
     setCurrentGameId(null);
     setIsFromMatchmaking(false);
     setPlayerRole('none');
+    setGameNotFoundId(null);
     updateURL(null); // Update URL to remove game_id
   };
 
@@ -493,6 +510,16 @@ function App() {
 
         <Footer />
       </div>
+    );
+  }
+
+  // Game Not Found View
+  if (currentView === 'game-not-found' && gameNotFoundId) {
+    return (
+      <GameNotFound
+        gameId={gameNotFoundId}
+        onBackToLobby={handleBackToLobby}
+      />
     );
   }
 

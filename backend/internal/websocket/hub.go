@@ -257,7 +257,14 @@ func (h *Hub) handleMessage(msg *Message, client *Client) {
 	switch msg.Type {
 	case TypeJoinGame:
 		log.Printf("Player %s joining game: %s", client.id, msg.GameID)
-		h.gameManager.GetOrCreateGame(msg.GameID)
+
+		// Check if game exists before allowing join
+		game := h.gameManager.GetGame(msg.GameID)
+		if game == nil {
+			log.Printf("Game %s does not exist, cannot join", msg.GameID)
+			h.sendErrorToClient(client, "Game does not exist. Games can only be created through matchmaking.")
+			return
+		}
 
 		// Add client to game room
 		h.AddClientToGame(client, msg.GameID)
