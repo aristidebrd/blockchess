@@ -1,22 +1,13 @@
 package game
 
 import (
-	"context"
-	"crypto/ecdsa"
 	"fmt"
 	"log"
-	"math/big"
-	"os"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/ethclient"
-	"github.com/joho/godotenv"
 	"github.com/notnil/chess"
 )
 
@@ -55,165 +46,65 @@ type GameState struct {
 	mu sync.RWMutex
 }
 
+// Manager handles game logic and orchestrates services
 type Manager struct {
-	games map[string]*GameState
-	mu    sync.RWMutex
-	// Callback for broadcasting move results
+	games              map[string]*GameState
+	mu                 sync.RWMutex
 	moveResultCallback func(gameID, move string)
-	// Callback for broadcasting game end
-	gameEndCallback func(gameID, winner, reason string, gameStats map[string]any)
+	gameEndCallback    func(gameID, winner, reason string, gameStats map[string]any)
 
-	// Contract integration
-	ethClient interface {
-		PendingNonceAt(ctx context.Context, account common.Address) (uint64, error)
-		NetworkID(ctx context.Context) (*big.Int, error)
-		SuggestGasPrice(ctx context.Context) (*big.Int, error)
-	}
-	gameContractAddr common.Address
-	privateKey       *ecdsa.PrivateKey
-	auth             *bind.TransactOpts
-	defaultStakeWei  *big.Int
+	// Services (dependency injection)
+	blockchainService BlockchainService
+	configService     ConfigService
 }
 
-// ContractConfig holds the configuration for contract integration
-type ContractConfig struct {
-	RPCUrl              string
-	PrivateKey          string
-	GameContractAddress string
-	DefaultStakeETH     string // Default stake amount in ETH (e.g., "0.01")
-}
-
+// NewManager creates a new game manager with default services
 func NewManager() *Manager {
-	return NewManagerWithContracts(nil)
-}
+	configService := NewConfigService()
 
-func NewManagerWithContracts(config *ContractConfig) *Manager {
-	m := &Manager{
-		games: make(map[string]*GameState),
-	}
-
-	// Initialize contract integration if config is provided
-	if config != nil {
-		if err := m.initializeContracts(config); err != nil {
-			log.Printf("Warning: Failed to initialize contracts: %v", err)
-			log.Printf("Continuing without contract integration...")
+	// Try to initialize blockchain service
+	var blockchainService BlockchainService
+	config, err := configService.LoadBlockchainConfig()
+	if err != nil {
+		log.Printf("Warning: Failed to load blockchain config: %v", err)
+		log.Printf("Using mock blockchain service...")
+		blockchainService = NewMockBlockchainService()
+	} else {
+		blockchainService, err = NewEthereumBlockchainService(config)
+		if err != nil {
+			log.Printf("Warning: Failed to initialize blockchain service: %v", err)
+			log.Printf("Using mock blockchain service...")
+			blockchainService = NewMockBlockchainService()
 		}
 	}
 
-	return m
+	return &Manager{
+		games:             make(map[string]*GameState),
+		blockchainService: blockchainService,
+		configService:     configService,
+	}
 }
 
-// LoadContractConfigFromEnv loads contract configuration from environment variables
-func LoadContractConfigFromEnv() (*ContractConfig, error) {
-	// Load environment variables
-	if err := godotenv.Load(".env.local"); err != nil {
-		log.Printf("Warning: .env.local file not found, using environment variables")
+// NewManagerWithServices creates a new game manager with injected services
+func NewManagerWithServices(blockchainService BlockchainService, configService ConfigService) *Manager {
+	return &Manager{
+		games:             make(map[string]*GameState),
+		blockchainService: blockchainService,
+		configService:     configService,
 	}
-
-	config := &ContractConfig{
-		RPCUrl:              getEnv("RPC_URL", "http://127.0.0.1:8545"),
-		PrivateKey:          getEnv("PRIVATE_KEY", ""),
-		GameContractAddress: getEnv("GAME_CONTRACT_ADDRESS", ""),
-		DefaultStakeETH:     getEnv("DEFAULT_STAKE_ETH", "0.01"),
-	}
-
-	if config.PrivateKey == "" {
-		return nil, fmt.Errorf("PRIVATE_KEY environment variable not set")
-	}
-	if config.GameContractAddress == "" {
-		return nil, fmt.Errorf("GAME_CONTRACT_ADDRESS environment variable not set")
-	}
-
-	return config, nil
 }
 
-func getEnv(key, defaultValue string) string {
-	if value := os.Getenv(key); value != "" {
-		return value
-	}
-	return defaultValue
-}
-
-func (m *Manager) initializeContracts(config *ContractConfig) error {
-	// Connect to Ethereum client
-	client, err := ethclient.Dial(config.RPCUrl)
-	if err != nil {
-		return fmt.Errorf("failed to connect to Ethereum client: %v", err)
-	}
-
-	// Parse private key
-	privateKey, err := crypto.HexToECDSA(config.PrivateKey)
-	if err != nil {
-		return fmt.Errorf("failed to parse private key: %v", err)
-	}
-
-	// Get chain ID
-	chainID, err := client.NetworkID(context.Background())
-	if err != nil {
-		return fmt.Errorf("failed to get chain ID: %v", err)
-	}
-
-	// Create transactor
-	auth, err := bind.NewKeyedTransactorWithChainID(privateKey, chainID)
-	if err != nil {
-		return fmt.Errorf("failed to create transactor: %v", err)
-	}
-
-	// Set gas parameters
-	auth.GasLimit = uint64(3000000)
-	gasPrice, err := client.SuggestGasPrice(context.Background())
-	if err != nil {
-		return fmt.Errorf("failed to get gas price: %v", err)
-	}
-	auth.GasPrice = gasPrice
-
-	// Parse default stake amount
-	stakeFloat, err := strconv.ParseFloat(config.DefaultStakeETH, 64)
-	if err != nil {
-		return fmt.Errorf("failed to parse default stake amount: %v", err)
-	}
-	// Convert ETH to Wei (1 ETH = 10^18 Wei)
-	stakeWei := new(big.Float).Mul(big.NewFloat(stakeFloat), big.NewFloat(1e18))
-	defaultStakeWei, _ := stakeWei.Int(nil)
-
-	// Store contract configuration
-	m.ethClient = client
-	m.gameContractAddr = common.HexToAddress(config.GameContractAddress)
-	m.privateKey = privateKey
-	m.auth = auth
-	m.defaultStakeWei = defaultStakeWei
-
-	log.Printf("Contract integration initialized successfully")
-	log.Printf("Game Contract: %s", m.gameContractAddr.Hex())
-	log.Printf("Default Stake: %s Wei (%s ETH)", m.defaultStakeWei.String(), config.DefaultStakeETH)
-
-	return nil
-}
-
-// SetContractClients sets the contract clients for testing (used by tests)
-func (m *Manager) SetContractClients(client interface{}, gameContract interface{}, vaultContract interface{}, auth *bind.TransactOpts) {
-	// Handle both real ethclient and simulated backend
-	if ethClient, ok := client.(interface {
-		PendingNonceAt(ctx context.Context, account common.Address) (uint64, error)
-		NetworkID(ctx context.Context) (*big.Int, error)
-		SuggestGasPrice(ctx context.Context) (*big.Int, error)
-	}); ok {
-		m.ethClient = ethClient
-	}
-	m.auth = auth
-	m.defaultStakeWei = big.NewInt(10000000000000000) // 0.01 ETH for testing
-}
-
-// Set the callback for broadcasting move results
+// SetMoveResultCallback sets the callback for broadcasting move results
 func (m *Manager) SetMoveResultCallback(callback func(gameID, move string)) {
 	m.moveResultCallback = callback
 }
 
-// Set the callback for broadcasting game end
+// SetGameEndCallback sets the callback for broadcasting game end
 func (m *Manager) SetGameEndCallback(callback func(gameID, winner, reason string, gameStats map[string]any)) {
 	m.gameEndCallback = callback
 }
 
+// GetOrCreateGame gets an existing game or creates a new one
 func (m *Manager) GetOrCreateGame(gameID string) *GameState {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -221,6 +112,8 @@ func (m *Manager) GetOrCreateGame(gameID string) *GameState {
 	if game, exists := m.games[gameID]; exists {
 		return game
 	}
+
+	log.Printf("Creating new game %s locally...", gameID)
 
 	// Create new game locally
 	game := &GameState{
@@ -245,9 +138,10 @@ func (m *Manager) GetOrCreateGame(gameID string) *GameState {
 
 	m.games[gameID] = game
 
-	// Create game on-chain if contract integration is available
-	if m.ethClient != nil && m.gameContractAddr != (common.Address{}) {
-		go m.createGameOnChain(gameID)
+	// Create game on blockchain if service is available
+	if m.blockchainService != nil && m.blockchainService.IsConnected() {
+		log.Printf("Creating game %s on blockchain...", gameID)
+		go m.createGameOnBlockchain(gameID)
 	}
 
 	// Start game timer
@@ -256,6 +150,14 @@ func (m *Manager) GetOrCreateGame(gameID string) *GameState {
 	return game
 }
 
+// createGameOnBlockchain creates a game on the blockchain asynchronously
+func (m *Manager) createGameOnBlockchain(gameID string) {
+	if err := m.blockchainService.CreateGame(gameID, nil); err != nil {
+		log.Printf("Error creating game %s on blockchain: %v", gameID, err)
+	}
+}
+
+// runGameTimer manages the game timer and move execution
 func (m *Manager) runGameTimer(game *GameState) {
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
@@ -275,7 +177,7 @@ func (m *Manager) runGameTimer(game *GameState) {
 				moveApplied = true
 			}
 
-			// Check if the game ended after this move, but don't stop the timer yet
+			// Check if the game ended after this move
 			gameEnded := moveApplied && m.checkGameEnd(game)
 
 			// Reset for next turn immediately to prevent race conditions
@@ -290,31 +192,103 @@ func (m *Manager) runGameTimer(game *GameState) {
 
 			game.mu.Unlock()
 
-			// Broadcast move result after reset - this allows players to see the final move
+			// Broadcast move result after reset
 			m.BroadcastMoveResult(game.ID, bestMove)
 
-			// If the game ended, handle it after broadcasting the move result
+			// Handle game end if applicable
 			if gameEnded {
-				log.Printf("Game %s ended after move %s! Getting final stats...", game.ID, bestMove)
+				log.Printf("Game %s ended after move %s!", game.ID, bestMove)
 
-				// Get final stats (need to re-acquire lock briefly)
+				// Get final stats
 				game.mu.RLock()
 				gameStats := m.getGameStatsUnsafe(game, true)
 				game.mu.RUnlock()
 
-				log.Printf("Broadcasting game end for %s", game.ID)
-				// Broadcast game end after players have seen the final move
-				m.broadcastGameEnd(game.ID, gameStats)
+				// Broadcast game end and handle blockchain update
+				m.handleGameEnd(game.ID, gameStats)
 				log.Printf("Game %s timer stopped", game.ID)
-				return // Game ended, stop the timer
+				return
 			}
 		} else {
-			// Timer is counting down, just unlock and continue
 			game.mu.Unlock()
 		}
 	}
 }
 
+// handleGameEnd processes game end logic including blockchain updates
+func (m *Manager) handleGameEnd(gameID string, gameStats map[string]any) {
+	// Determine winner and reason from game state
+	m.mu.RLock()
+	game, exists := m.games[gameID]
+	m.mu.RUnlock()
+
+	if !exists {
+		return
+	}
+
+	game.mu.RLock()
+	outcome := game.Game.Outcome()
+	method := game.Game.Method()
+	game.mu.RUnlock()
+
+	if outcome == chess.NoOutcome {
+		return
+	}
+
+	// Map chess outcomes to blockchain results
+	var winner, reason string
+	var blockchainResult GameResult
+
+	switch outcome {
+	case chess.WhiteWon:
+		winner = "white"
+		blockchainResult = GameResultWhiteWins
+		if method == chess.Checkmate {
+			reason = "checkmate"
+		} else {
+			reason = "resignation"
+		}
+	case chess.BlackWon:
+		winner = "black"
+		blockchainResult = GameResultBlackWins
+		if method == chess.Checkmate {
+			reason = "checkmate"
+		} else {
+			reason = "resignation"
+		}
+	case chess.Draw:
+		winner = "draw"
+		blockchainResult = GameResultDraw
+		switch method {
+		case chess.Stalemate:
+			reason = "stalemate"
+		case chess.InsufficientMaterial:
+			reason = "insufficient_material"
+		case chess.ThreefoldRepetition:
+			reason = "threefold_repetition"
+		case chess.FiftyMoveRule:
+			reason = "fifty_move_rule"
+		default:
+			reason = "draw"
+		}
+	}
+
+	// Update blockchain
+	if m.blockchainService != nil && m.blockchainService.IsConnected() {
+		go func() {
+			if err := m.blockchainService.EndGame(gameID, blockchainResult); err != nil {
+				log.Printf("Error ending game %s on blockchain: %v", gameID, err)
+			}
+		}()
+	}
+
+	// Broadcast game end
+	if m.gameEndCallback != nil {
+		m.gameEndCallback(gameID, winner, reason, gameStats)
+	}
+}
+
+// getBestMove returns the move with the most votes
 func (m *Manager) getBestMove(game *GameState) string {
 	var bestMove string
 	var maxVotes int
@@ -327,13 +301,13 @@ func (m *Manager) getBestMove(game *GameState) string {
 	}
 
 	if bestMove == "" {
-		// No votes - return a default move or skip
 		return "skip"
 	}
 
 	return bestMove
 }
 
+// VoteForMove allows a player to vote for a move
 func (m *Manager) VoteForMove(gameID, walletAddress, move string, team string) error {
 	m.mu.RLock()
 	game, exists := m.games[gameID]
@@ -370,21 +344,17 @@ func (m *Manager) VoteForMove(gameID, walletAddress, move string, team string) e
 		return fmt.Errorf("player already voted this round")
 	}
 
-	// Validate the move using the chess library
+	// Validate the move
 	if !m.isValidMove(game, move) {
 		return fmt.Errorf("invalid move: %s", move)
 	}
 
-	// Check if move already exists, if not initialize it
+	// Record vote
 	if _, exists := game.Votes[move]; !exists {
 		game.Votes[move] = 0
 	}
-
-	// Record vote
 	game.Votes[move]++
 	game.PlayerVotedThisRound[walletAddress] = true
-
-	// Increment total vote count for this player
 	game.PlayerTotalVotes[walletAddress]++
 
 	// Update team vote count and pot
@@ -401,17 +371,27 @@ func (m *Manager) VoteForMove(gameID, walletAddress, move string, team string) e
 		game.TotalPot += 0.01
 	}
 
+	// Record move on blockchain if available
+	if m.blockchainService != nil && m.blockchainService.IsConnected() {
+		go func() {
+			player := common.HexToAddress(walletAddress)
+			if err := m.blockchainService.RecordMove(gameID, player, 31337); err != nil {
+				log.Printf("Error recording move on blockchain: %v", err)
+			}
+		}()
+	}
+
 	log.Printf("Player %s voted for move %s in team %s (game %s)", walletAddress, move, team, gameID)
 	return nil
 }
 
-// Check if a move is valid in the current game state
+// isValidMove checks if a move is valid in the current game state
 func (m *Manager) isValidMove(game *GameState, moveStr string) bool {
 	if len(moveStr) < 2 {
 		return false
 	}
 
-	// If the move is in coordinate notation (e.g., "e2e4"), find the matching Move
+	// Handle coordinate notation (e.g., "e2e4")
 	if len(moveStr) == 4 {
 		from := parseSquare(moveStr[:2])
 		to := parseSquare(moveStr[2:])
@@ -420,24 +400,22 @@ func (m *Manager) isValidMove(game *GameState, moveStr string) bool {
 			return false
 		}
 
-		// Get all valid moves and find one that matches our from-to squares
 		validMoves := game.Game.ValidMoves()
 		for _, move := range validMoves {
 			if move.S1() == from && move.S2() == to {
 				return true
 			}
 		}
-
 		return false
 	}
 
-	// If it's already in algebraic notation, test it directly
+	// Handle algebraic notation
 	gameCopy := game.Game.Clone()
 	err := gameCopy.MoveStr(moveStr)
 	return err == nil
 }
 
-// Helper function to parse square notation like "e2" into chess.Square
+// parseSquare converts square notation like "e2" into chess.Square
 func parseSquare(square string) chess.Square {
 	if len(square) != 2 {
 		return chess.NoSquare
@@ -446,25 +424,18 @@ func parseSquare(square string) chess.Square {
 	file := square[0]
 	rank := square[1]
 
-	// Convert file ('a'-'h') to 0-7
-	if file < 'a' || file > 'h' {
+	if file < 'a' || file > 'h' || rank < '1' || rank > '8' {
 		return chess.NoSquare
 	}
+
 	fileIndex := int(file - 'a')
-
-	// Convert rank ('1'-'8') to 0-7
-	if rank < '1' || rank > '8' {
-		return chess.NoSquare
-	}
 	rankIndex := int(rank - '1')
-
-	// Calculate square index: rank * 8 + file
 	squareIndex := rankIndex*8 + fileIndex
 
 	return chess.Square(squareIndex)
 }
 
-// Get all valid moves for the current position
+// GetValidMoves returns all valid moves for the current position
 func (m *Manager) GetValidMoves(gameID string) []string {
 	m.mu.RLock()
 	game, exists := m.games[gameID]
@@ -486,6 +457,7 @@ func (m *Manager) GetValidMoves(gameID string) []string {
 	return moveStrings
 }
 
+// GetVotes returns a copy of the current votes
 func (m *Manager) GetVotes(gameID string) map[string]int {
 	m.mu.RLock()
 	game, exists := m.games[gameID]
@@ -498,7 +470,6 @@ func (m *Manager) GetVotes(gameID string) map[string]int {
 	game.mu.RLock()
 	defer game.mu.RUnlock()
 
-	// Return copy of votes
 	votes := make(map[string]int)
 	for k, v := range game.Votes {
 		votes[k] = v
@@ -507,6 +478,7 @@ func (m *Manager) GetVotes(gameID string) map[string]int {
 	return votes
 }
 
+// GetTimeLeft returns the time left in the current turn
 func (m *Manager) GetTimeLeft(gameID string) int {
 	m.mu.RLock()
 	game, exists := m.games[gameID]
@@ -522,14 +494,14 @@ func (m *Manager) GetTimeLeft(gameID string) int {
 	return game.TimeLeft
 }
 
+// BroadcastMoveResult broadcasts the result of a move
 func (m *Manager) BroadcastMoveResult(gameID, move string) {
-	// Call the callback if it's set (will be handled by the hub)
 	if m.moveResultCallback != nil {
 		m.moveResultCallback(gameID, move)
 	}
 }
 
-// Add player to team with wallet address validation
+// AddPlayerToTeam adds a player to a team with wallet address validation
 func (m *Manager) AddPlayerToTeam(gameID, walletAddress, team string) error {
 	m.mu.RLock()
 	game, exists := m.games[gameID]
@@ -539,12 +511,11 @@ func (m *Manager) AddPlayerToTeam(gameID, walletAddress, team string) error {
 		return fmt.Errorf("game not found: %s", gameID)
 	}
 
-	// Validate wallet address format (basic check)
+	// Validate wallet address
 	if walletAddress == "" {
 		return fmt.Errorf("wallet address cannot be empty")
 	}
 
-	// Simple validation that it looks like an Ethereum address
 	if len(walletAddress) != 42 || !strings.HasPrefix(walletAddress, "0x") {
 		return fmt.Errorf("invalid wallet address format")
 	}
@@ -582,7 +553,7 @@ func (m *Manager) AddPlayerToTeam(gameID, walletAddress, team string) error {
 	return nil
 }
 
-// Get game statistics
+// GetGameStats returns game statistics
 func (m *Manager) GetGameStats(gameID string) map[string]any {
 	m.mu.RLock()
 	game, exists := m.games[gameID]
@@ -595,165 +566,10 @@ func (m *Manager) GetGameStats(gameID string) map[string]any {
 	game.mu.RLock()
 	defer game.mu.RUnlock()
 
-	// Convert chess board to string array
-	board := make([][]string, 8)
-	pieceMap := map[string]string{
-		"♜": "r", "♞": "n", "♝": "b", "♛": "q", "♚": "k", "♟": "p", // Black pieces
-		"♖": "R", "♘": "N", "♗": "B", "♕": "Q", "♔": "K", "♙": "P", // White pieces
-	}
-
-	for i := range 8 {
-		board[i] = make([]string, 8)
-		for j := range 8 {
-			// Chess library uses files a-h (0-7) and ranks 1-8 (0-7)
-			// Square mapping: rank * 8 + file
-			// Our board: [row][col] where row 0 = rank 8, row 7 = rank 1
-			rank := 7 - i // Convert row to rank (row 0 = rank 8)
-			file := j     // file stays the same (col 0 = file a)
-			square := chess.Square(rank*8 + file)
-			piece := game.Game.Position().Board().Piece(square)
-			if piece == chess.NoPiece {
-				board[i][j] = ""
-			} else {
-				unicodeSymbol := piece.String()
-				if simpleSymbol, exists := pieceMap[unicodeSymbol]; exists {
-					board[i][j] = simpleSymbol
-				} else {
-					board[i][j] = ""
-				}
-			}
-		}
-	}
-
-	// Get current turn from chess game
-	currentTurn := "white"
-	if game.Game.Position().Turn() == chess.Black {
-		currentTurn = "black"
-	}
-
-	return map[string]any{
-		"whitePlayers":          len(game.WhitePlayers),
-		"blackPlayers":          len(game.BlackPlayers),
-		"whiteCurrentTurnVotes": game.WhiteVotesThisTurn,
-		"blackCurrentTurnVotes": game.BlackVotesThisTurn,
-		"whiteTeamTotalVotes":   game.WhiteTeamTotalVotes,
-		"blackTeamTotalVotes":   game.BlackTeamTotalVotes,
-		"totalPot":              game.TotalPot,
-		"whitePot":              game.WhitePot,
-		"blackPot":              game.BlackPot,
-		"currentTurn":           currentTurn,
-		"timeLeft":              game.TimeLeft,
-		"currentMove":           game.CurrentMove,
-		"playerVotedThisRound":  game.PlayerVotedThisRound,
-		"playerTotalVotes":      game.PlayerTotalVotes,
-		"board":                 board,
-	}
+	return m.getGameStatsUnsafe(game, false)
 }
 
-// Check if a specific player has voted in the current round
-func (m *Manager) HasPlayerVoted(gameID, walletAddress string) bool {
-	m.mu.RLock()
-	game, exists := m.games[gameID]
-	m.mu.RUnlock()
-
-	if !exists {
-		return false
-	}
-
-	game.mu.RLock()
-	defer game.mu.RUnlock()
-
-	return game.PlayerVotedThisRound[walletAddress]
-}
-
-// Get total number of votes a specific player has made throughout the game
-func (m *Manager) GetPlayerTotalVotes(gameID, walletAddress string) int {
-	m.mu.RLock()
-	game, exists := m.games[gameID]
-	m.mu.RUnlock()
-
-	if !exists {
-		return 0
-	}
-
-	game.mu.RLock()
-	defer game.mu.RUnlock()
-
-	return game.PlayerTotalVotes[walletAddress]
-}
-
-// Get player's team in a specific game
-func (m *Manager) GetPlayerTeam(gameID, walletAddress string) string {
-	m.mu.RLock()
-	game, exists := m.games[gameID]
-	m.mu.RUnlock()
-
-	if !exists {
-		return ""
-	}
-
-	game.mu.RLock()
-	defer game.mu.RUnlock()
-
-	if game.WhitePlayers[walletAddress] {
-		return "white"
-	}
-	if game.BlackPlayers[walletAddress] {
-		return "black"
-	}
-	return ""
-}
-
-// Apply a move to the board (move format: "e2e4" or "e4")
-func (m *Manager) applyMoveToBoard(game *GameState, move string) {
-	if len(move) < 2 {
-		log.Printf("Invalid move format: %s", move)
-		return // Invalid move format
-	}
-
-	log.Printf("Applying move %s to game %s", move, game.ID)
-
-	// Handle coordinate notation (e.g., "e2e4")
-	if len(move) == 4 {
-		from := parseSquare(move[:2])
-		to := parseSquare(move[2:])
-
-		if from == chess.NoSquare || to == chess.NoSquare {
-			log.Printf("Invalid square notation in move: %s", move)
-			return
-		}
-
-		// Find the matching Move object
-		validMoves := game.Game.ValidMoves()
-		for _, validMove := range validMoves {
-			if validMove.S1() == from && validMove.S2() == to {
-				if err := game.Game.Move(validMove); err != nil {
-					log.Printf("Error applying move %s: %v", move, err)
-					return
-				}
-				log.Printf("Successfully applied coordinate move %s", move)
-				return
-			}
-		}
-		log.Printf("No valid move found for %s", move)
-		return
-	}
-
-	// Handle algebraic notation (e.g., "e4", "Nf3")
-	if err := game.Game.MoveStr(move); err != nil {
-		log.Printf("Error applying algebraic move %s: %v", move, err)
-		return
-	}
-	log.Printf("Successfully applied algebraic move %s", move)
-}
-
-// Check if the game has ended (checkmate, stalemate, draw) - returns true if game ended
-func (m *Manager) checkGameEnd(game *GameState) bool {
-	outcome := game.Game.Outcome()
-	return outcome != chess.NoOutcome
-}
-
-// Get game statistics without locking (caller must hold the lock)
+// getGameStatsUnsafe returns game statistics without locking (caller must hold the lock)
 func (m *Manager) getGameStatsUnsafe(game *GameState, gameEnded bool) map[string]any {
 	// Convert chess board to string array
 	board := make([][]string, 8)
@@ -765,9 +581,6 @@ func (m *Manager) getGameStatsUnsafe(game *GameState, gameEnded bool) map[string
 	for i := range 8 {
 		board[i] = make([]string, 8)
 		for j := range 8 {
-			// Chess library uses files a-h (0-7) and ranks 1-8 (0-7)
-			// Square mapping: rank * 8 + file
-			// Our board: [row][col] where row 0 = rank 8, row 7 = rank 1
 			rank := 7 - i // Convert row to rank (row 0 = rank 8)
 			file := j     // file stays the same (col 0 = file a)
 			square := chess.Square(rank*8 + file)
@@ -815,64 +628,106 @@ func (m *Manager) getGameStatsUnsafe(game *GameState, gameEnded bool) map[string
 	}
 }
 
-// Broadcast game end (called after releasing the game lock)
-func (m *Manager) broadcastGameEnd(gameID string, gameStats map[string]any) {
-	// Re-acquire the game to get the final state for winner/reason detection
+// HasPlayerVoted checks if a specific player has voted in the current round
+func (m *Manager) HasPlayerVoted(gameID, walletAddress string) bool {
 	m.mu.RLock()
 	game, exists := m.games[gameID]
 	m.mu.RUnlock()
 
 	if !exists {
-		return
+		return false
 	}
 
 	game.mu.RLock()
+	defer game.mu.RUnlock()
+
+	return game.PlayerVotedThisRound[walletAddress]
+}
+
+// GetPlayerTotalVotes returns the total number of votes a player has made
+func (m *Manager) GetPlayerTotalVotes(gameID, walletAddress string) int {
+	m.mu.RLock()
+	game, exists := m.games[gameID]
+	m.mu.RUnlock()
+
+	if !exists {
+		return 0
+	}
+
+	game.mu.RLock()
+	defer game.mu.RUnlock()
+
+	return game.PlayerTotalVotes[walletAddress]
+}
+
+// GetPlayerTeam returns the team a player is on
+func (m *Manager) GetPlayerTeam(gameID, walletAddress string) string {
+	m.mu.RLock()
+	game, exists := m.games[gameID]
+	m.mu.RUnlock()
+
+	if !exists {
+		return ""
+	}
+
+	game.mu.RLock()
+	defer game.mu.RUnlock()
+
+	if game.WhitePlayers[walletAddress] {
+		return "white"
+	}
+	if game.BlackPlayers[walletAddress] {
+		return "black"
+	}
+	return ""
+}
+
+// applyMoveToBoard applies a move to the chess board
+func (m *Manager) applyMoveToBoard(game *GameState, move string) {
+	if len(move) < 2 {
+		log.Printf("Invalid move format: %s", move)
+		return
+	}
+
+	log.Printf("Applying move %s to game %s", move, game.ID)
+
+	// Handle coordinate notation (e.g., "e2e4")
+	if len(move) == 4 {
+		from := parseSquare(move[:2])
+		to := parseSquare(move[2:])
+
+		if from == chess.NoSquare || to == chess.NoSquare {
+			log.Printf("Invalid square notation in move: %s", move)
+			return
+		}
+
+		validMoves := game.Game.ValidMoves()
+		for _, validMove := range validMoves {
+			if validMove.S1() == from && validMove.S2() == to {
+				if err := game.Game.Move(validMove); err != nil {
+					log.Printf("Error applying move %s: %v", move, err)
+					return
+				}
+				log.Printf("Successfully applied coordinate move %s", move)
+				return
+			}
+		}
+		log.Printf("No valid move found for %s", move)
+		return
+	}
+
+	// Handle algebraic notation (e.g., "e4", "Nf3")
+	if err := game.Game.MoveStr(move); err != nil {
+		log.Printf("Error applying algebraic move %s: %v", move, err)
+		return
+	}
+	log.Printf("Successfully applied algebraic move %s", move)
+}
+
+// checkGameEnd checks if the game has ended
+func (m *Manager) checkGameEnd(game *GameState) bool {
 	outcome := game.Game.Outcome()
-	method := game.Game.Method()
-	game.mu.RUnlock()
-
-	if outcome == chess.NoOutcome {
-		return // No game end needed
-	}
-
-	// Determine winner and reason
-	var winner, reason string
-
-	switch outcome {
-	case chess.WhiteWon:
-		winner = "white"
-		if method == chess.Checkmate {
-			reason = "checkmate"
-		} else {
-			reason = "resignation" // or other methods
-		}
-	case chess.BlackWon:
-		winner = "black"
-		if method == chess.Checkmate {
-			reason = "checkmate"
-		} else {
-			reason = "resignation" // or other methods
-		}
-	case chess.Draw:
-		winner = "draw"
-		switch method {
-		case chess.Stalemate:
-			reason = "stalemate"
-		case chess.InsufficientMaterial:
-			reason = "insufficient_material"
-		case chess.ThreefoldRepetition:
-			reason = "threefold_repetition"
-		case chess.FiftyMoveRule:
-			reason = "fifty_move_rule"
-		default:
-			reason = "draw"
-		}
-	}
-
-	// Broadcast game end if callback is set
-	if m.gameEndCallback != nil {
-		m.gameEndCallback(gameID, winner, reason, gameStats)
-	}
+	return outcome != chess.NoOutcome
 }
 
 // GetAllGames returns a list of all game IDs
@@ -887,51 +742,12 @@ func (m *Manager) GetAllGames() []string {
 	return gameIDs
 }
 
-// createGameOnChain creates the game on the smart contract
-func (m *Manager) createGameOnChain(gameID string) {
-	log.Printf("Creating game %s on-chain...", gameID)
+// GetBlockchainService returns the blockchain service (for testing)
+func (m *Manager) GetBlockchainService() BlockchainService {
+	return m.blockchainService
+}
 
-	// Convert gameID string to uint256
-	gameIDInt, err := strconv.ParseUint(gameID, 10, 64)
-	if err != nil {
-		log.Printf("Error: gameID %s is not a valid number for on-chain creation", gameID)
-		return
-	}
-
-	// Get fresh nonce
-	nonce, err := m.ethClient.PendingNonceAt(context.Background(), m.auth.From)
-	if err != nil {
-		log.Printf("Error getting nonce for game creation: %v", err)
-		return
-	}
-	m.auth.Nonce = big.NewInt(int64(nonce))
-
-	// Call the contract's createGame function
-	// This is a simplified call - you'll need to import and use the generated bindings
-	// For now, using raw transaction call
-
-	// Create the transaction data
-	// Method ID for createGame(uint256,uint256) is the first 4 bytes of keccak256("createGame(uint256,uint256)")
-	// This would be: 0x60104cef
-
-	// For a proper implementation, you should use the generated Go bindings:
-	/*
-		gameContract, err := gamecontract.NewGamecontract(m.gameContractAddr, m.ethClient)
-		if err != nil {
-			log.Printf("Error creating game contract instance: %v", err)
-			return
-		}
-
-		tx, err := gameContract.CreateGame(m.auth, big.NewInt(int64(gameIDInt)), m.defaultStakeWei)
-		if err != nil {
-			log.Printf("Error creating game on-chain: %v", err)
-			return
-		}
-
-		log.Printf("Game %s created on-chain! Transaction: %s", gameID, tx.Hash().Hex())
-	*/
-
-	// For now, just log the attempt
-	log.Printf("Would create game %d on-chain with stake %s Wei", gameIDInt, m.defaultStakeWei.String())
-	log.Printf("Contract address: %s", m.gameContractAddr.Hex())
+// SetBlockchainService sets the blockchain service (for testing)
+func (m *Manager) SetBlockchainService(service BlockchainService) {
+	m.blockchainService = service
 }
