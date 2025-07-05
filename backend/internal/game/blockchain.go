@@ -768,8 +768,8 @@ func (s *EthereumBlockchainService) GeneratePermit2SignatureData(playerAddress c
 			"PermitDetails": []apitypes.Type{
 				{Name: "token", Type: "address"},
 				{Name: "amount", Type: "uint160"},
-				{Name: "expiration", Type: "uint48"},
-				{Name: "nonce", Type: "uint48"},
+				{Name: "expiration", Type: "uint256"},
+				{Name: "nonce", Type: "uint256"},
 			},
 		},
 		PrimaryType: "PermitSingle",

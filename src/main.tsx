@@ -17,7 +17,7 @@ const isDev = import.meta.env.MODE === 'development';
 
 // Local Foundry chain definition (no explicit type annotation)
 const localChain = {
-  id: 31337,
+  id: 84532,
   name: 'Anvil (Foundry)',
   network: 'foundry',
   nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
