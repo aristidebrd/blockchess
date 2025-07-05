@@ -102,7 +102,7 @@ const VotingPanel: React.FC<VotingPanelProps> = ({
             <span className="font-medium">You have voted and staked this round</span>
           </div>
           <p className="text-green-300 text-sm mt-1">
-            Your 0.01 ETH stake is locked in the vault. Wait for the next round to vote again.
+            Your 0.01 USDC stake is locked in the vault. Wait for the next round to vote again.
           </p>
         </div>
       )}
@@ -118,7 +118,7 @@ const VotingPanel: React.FC<VotingPanelProps> = ({
             </div>
             <div className="flex justify-between">
               <span className="text-gray-300">Stake Amount:</span>
-              <span className="text-yellow-400 font-bold">{pendingVote.betAmount} ETH</span>
+              <span className="text-yellow-400 font-bold">{pendingVote.betAmount} USDC</span>
             </div>
           </div>
           <div className="bg-yellow-900/30 border border-yellow-500/50 rounded-lg p-3 mb-4">

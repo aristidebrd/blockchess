@@ -36,7 +36,7 @@ func (c *DefaultConfigService) LoadBlockchainConfig() (*BlockchainConfig, error)
 		PrivateKey:           c.GetEnv("PRIVATE_KEY", ""),
 		GameContractAddress:  c.GetEnv("GAME_CONTRACT_ADDRESS", ""),
 		VaultContractAddress: c.GetEnv("VAULT_CONTRACT_ADDRESS", ""),
-		DefaultStakeETH:      c.GetEnv("DEFAULT_STAKE_ETH", "0.01"),
+		DefaultStakeUSDC:     c.GetEnv("DEFAULT_STAKE_USDC", "0.01"),
 	}
 
 	// Validate required fields
@@ -96,7 +96,7 @@ func (m *MockConfigService) LoadBlockchainConfig() (*BlockchainConfig, error) {
 		PrivateKey:           m.GetEnv("PRIVATE_KEY", "test_private_key"),
 		GameContractAddress:  m.GetEnv("GAME_CONTRACT_ADDRESS", "0x1234567890123456789012345678901234567890"),
 		VaultContractAddress: m.GetEnv("VAULT_CONTRACT_ADDRESS", "0x1234567890123456789012345678901234567890"),
-		DefaultStakeETH:      m.GetEnv("DEFAULT_STAKE_ETH", "0.01"),
+		DefaultStakeUSDC:     m.GetEnv("DEFAULT_STAKE_USDC", "0.01"),
 	}, nil
 }
 

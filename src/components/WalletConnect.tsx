@@ -1,8 +1,22 @@
-import React from 'react';
-import { Wallet, CheckCircle } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Wallet, CheckCircle, RefreshCw } from 'lucide-react';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
-import { useAccount, useBalance } from 'wagmi';
-import { formatEther } from 'viem';
+import { useAccount, useBalance, useReadContract } from 'wagmi';
+import { formatEther, formatUnits } from 'viem';
+
+// USDC Contract Address (Base Sepolia from your credit script)
+const USDC_CONTRACT_ADDRESS = '0x036CbD53842c5426634e7929541eC2318f3dCF7e';
+
+// ERC20 ABI for balanceOf function
+const ERC20_ABI = [
+  {
+    name: 'balanceOf',
+    type: 'function',
+    inputs: [{ name: 'account', type: 'address' }],
+    outputs: [{ name: '', type: 'uint256' }],
+    stateMutability: 'view',
+  },
+] as const;
 
 interface WalletConnectProps {
   onWalletChange?: (wallet: any | null) => void;
@@ -11,24 +25,61 @@ interface WalletConnectProps {
 
 const WalletConnect: React.FC<WalletConnectProps> = ({ onWalletChange, isCompact = false }) => {
   const { address, isConnected } = useAccount();
-  const { data: balance } = useBalance({
+  const [usdcBalance, setUsdcBalance] = useState<string>('0.0');
+  const [isLoadingUSDC, setIsLoadingUSDC] = useState(false);
+
+  // Get ETH balance (keep for reference)
+  const { data: ethBalance } = useBalance({
     address: address,
   });
 
-  // Update parent component when wallet state changes (if callback provided)
-  React.useEffect(() => {
+  // Get USDC balance using contract read
+  const { data: usdcBalanceData, refetch: refetchUSDC } = useReadContract({
+    address: USDC_CONTRACT_ADDRESS,
+    abi: ERC20_ABI,
+    functionName: 'balanceOf',
+    args: address ? [address] : undefined,
+    query: {
+      enabled: !!address && isConnected,
+      refetchInterval: 10000, // Refetch every 10 seconds
+    },
+  });
+
+  // Format USDC balance (6 decimals)
+  useEffect(() => {
+    if (usdcBalanceData) {
+      const formatted = formatUnits(usdcBalanceData, 6);
+      setUsdcBalance(parseFloat(formatted).toFixed(6));
+    } else {
+      setUsdcBalance('0.0');
+    }
+  }, [usdcBalanceData]);
+
+  // Manual refresh function
+  const refreshBalance = async () => {
+    setIsLoadingUSDC(true);
+    try {
+      await refetchUSDC();
+    } finally {
+      setIsLoadingUSDC(false);
+    }
+  };
+
+  // Update parent component when wallet state changes
+  useEffect(() => {
     if (onWalletChange) {
-      if (isConnected && address && balance) {
+      if (isConnected && address) {
         onWalletChange({
           address: `${address.slice(0, 6)}...${address.slice(-4)}`,
-          balance: parseFloat(formatEther(balance.value)).toFixed(4),
+          balance: usdcBalance,
+          ethBalance: ethBalance ? parseFloat(formatEther(ethBalance.value)).toFixed(4) : '0.0',
           isConnected: true
         });
       } else {
         onWalletChange(null);
       }
     }
-  }, [isConnected, address, balance, onWalletChange]);
+  }, [isConnected, address, usdcBalance, ethBalance, onWalletChange]);
 
   if (isCompact) {
     return (
@@ -94,9 +145,7 @@ const WalletConnect: React.FC<WalletConnectProps> = ({ onWalletChange, isCompact
                         <div className="flex items-center space-x-2">
                           <CheckCircle className="w-4 h-4 text-green-400" />
                           <span className="text-white font-mono text-sm">{account.displayName}</span>
-                          {account.displayBalance && (
-                            <span className="text-green-400 font-bold text-sm">{account.displayBalance}</span>
-                          )}
+                          <span className="text-green-400 font-bold text-sm">{usdcBalance} USDC</span>
                         </div>
                       </div>
                       <button
@@ -168,10 +217,30 @@ const WalletConnect: React.FC<WalletConnectProps> = ({ onWalletChange, isCompact
                 {address ? `${address.slice(0, 6)}...${address.slice(-4)}` : ''}
               </span>
             </div>
+
+            {/* USDC Balance */}
+            <div className="flex justify-between items-center mb-2">
+              <span className="text-gray-300 text-sm">USDC Balance</span>
+              <div className="flex items-center space-x-2">
+                <span className="text-green-400 font-bold">
+                  {usdcBalance} USDC
+                </span>
+                <button
+                  onClick={refreshBalance}
+                  disabled={isLoadingUSDC}
+                  className="text-gray-400 hover:text-white transition-colors"
+                  title="Refresh balance"
+                >
+                  <RefreshCw className={`w-4 h-4 ${isLoadingUSDC ? 'animate-spin' : ''}`} />
+                </button>
+              </div>
+            </div>
+
+            {/* ETH Balance (for reference) */}
             <div className="flex justify-between items-center">
-              <span className="text-gray-300 text-sm">Balance</span>
-              <span className="text-green-400 font-bold">
-                {balance ? `${parseFloat(formatEther(balance.value)).toFixed(4)} ETH` : '0.0000 ETH'}
+              <span className="text-gray-300 text-sm">ETH Balance</span>
+              <span className="text-blue-400 font-bold">
+                {ethBalance ? `${parseFloat(formatEther(ethBalance.value)).toFixed(4)} ETH` : '0.0 ETH'}
               </span>
             </div>
           </div>
@@ -182,11 +251,17 @@ const WalletConnect: React.FC<WalletConnectProps> = ({ onWalletChange, isCompact
             <div className="space-y-2 text-sm">
               <div className="flex justify-between">
                 <span className="text-gray-300">Cost per vote:</span>
-                <span className="text-white font-medium">0.01 ETH</span>
+                <span className="text-white font-medium">10.0 USDC</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-300">Network:</span>
-                <span className="text-blue-400 font-medium">Ethereum</span>
+                <span className="text-blue-400 font-medium">Anvil Local</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-300">Sufficient funds:</span>
+                <span className={`font-medium ${parseFloat(usdcBalance) >= 10 ? 'text-green-400' : 'text-red-400'}`}>
+                  {parseFloat(usdcBalance) >= 10 ? 'Yes' : 'No'}
+                </span>
               </div>
             </div>
           </div>

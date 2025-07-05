@@ -384,7 +384,7 @@ func (m *Manager) VoteForMove(gameID, walletAddress, move string, team string) e
 			}
 			log.Printf("Recorded move on blockchain for player %s in game %s", walletAddress, gameID)
 			// Stake money in vault when voting
-			stakeAmount := big.NewInt(10000000000000000) // 0.01 ETH in wei
+			stakeAmount := big.NewInt(10000) // 0.01 USDC
 			if err := m.blockchainService.StakeOnVote(gameID, player, stakeAmount); err != nil {
 				log.Printf("Error staking on vote for player %s: %v", walletAddress, err)
 			}
@@ -624,13 +624,13 @@ func (m *Manager) getGameStatsUnsafe(game *GameState, gameEnded bool) map[string
 	whiteTeamPlayers := make([]map[string]any, 0)
 	for walletAddress := range game.WhitePlayers {
 		votes := game.PlayerTotalVotes[walletAddress]
-		spent := float64(votes) * 0.01 // Each vote costs 0.01 ETH
+		spent := float64(votes) * 0.01 // Each vote costs 0.01 USDC
 		whiteTeamPlayers = append(whiteTeamPlayers, map[string]any{
 			"walletAddress": walletAddress,
 			"totalVotes":    votes,
 			"totalSpent":    spent,
 		})
-		log.Printf("Collecting white player: %s - %d votes, %.3f ETH", walletAddress, votes, spent)
+		log.Printf("Collecting white player: %s - %d votes, %.3f USDC", walletAddress, votes, spent)
 	}
 	log.Printf("Total white team players collected: %d", len(whiteTeamPlayers))
 
@@ -638,13 +638,13 @@ func (m *Manager) getGameStatsUnsafe(game *GameState, gameEnded bool) map[string
 	blackTeamPlayers := make([]map[string]any, 0)
 	for walletAddress := range game.BlackPlayers {
 		votes := game.PlayerTotalVotes[walletAddress]
-		spent := float64(votes) * 0.01 // Each vote costs 0.01 ETH
+		spent := float64(votes) * 0.01 // Each vote costs 0.01 USDC
 		blackTeamPlayers = append(blackTeamPlayers, map[string]any{
 			"walletAddress": walletAddress,
 			"totalVotes":    votes,
 			"totalSpent":    spent,
 		})
-		log.Printf("Collecting black player: %s - %d votes, %.3f ETH", walletAddress, votes, spent)
+		log.Printf("Collecting black player: %s - %d votes, %.3f USDC", walletAddress, votes, spent)
 	}
 	log.Printf("Total black team players collected: %d", len(blackTeamPlayers))
 

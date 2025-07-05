@@ -62,7 +62,7 @@ type EthereumBlockchainService struct {
 	vaultContractAddr common.Address
 	auth              *bind.TransactOpts
 	privateKey        *ecdsa.PrivateKey
-	defaultStakeWei   *big.Int
+	defaultStakeUSDC  *big.Int
 }
 
 // BlockchainConfig holds blockchain configuration
@@ -71,7 +71,7 @@ type BlockchainConfig struct {
 	PrivateKey           string
 	GameContractAddress  string
 	VaultContractAddress string
-	DefaultStakeETH      string
+	DefaultStakeUSDC     string
 }
 
 // NewEthereumBlockchainService creates a new Ethereum blockchain service
@@ -110,12 +110,12 @@ func NewEthereumBlockchainService(config *BlockchainConfig) (*EthereumBlockchain
 	auth.GasPrice = gasPrice
 
 	// Parse default stake amount
-	stakeFloat, err := strconv.ParseFloat(config.DefaultStakeETH, 64)
+	stakeFloat, err := strconv.ParseFloat(config.DefaultStakeUSDC, 64)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse default stake amount: %v", err)
 	}
-	stakeWei := new(big.Float).Mul(big.NewFloat(stakeFloat), big.NewFloat(1e18))
-	defaultStakeWei, _ := stakeWei.Int(nil)
+	stakeUSDC := new(big.Float).Mul(big.NewFloat(stakeFloat), big.NewFloat(1e6))
+	defaultStakeUSDC, _ := stakeUSDC.Int(nil)
 
 	// Create game contract instance
 	gameContractAddr := common.HexToAddress(config.GameContractAddress)
@@ -139,13 +139,13 @@ func NewEthereumBlockchainService(config *BlockchainConfig) (*EthereumBlockchain
 		vaultContractAddr: vaultContractAddr,
 		auth:              auth,
 		privateKey:        privateKey,
-		defaultStakeWei:   defaultStakeWei,
+		defaultStakeUSDC:  defaultStakeUSDC,
 	}
 
 	log.Printf("Blockchain service initialized successfully")
 	log.Printf("Game Contract: %s", gameContractAddr.Hex())
 	log.Printf("Vault Contract: %s", vaultContractAddr.Hex())
-	log.Printf("Default Stake: %s Wei (%s ETH)", defaultStakeWei.String(), config.DefaultStakeETH)
+	log.Printf("Default Stake: %s USDC", defaultStakeUSDC.String(), config.DefaultStakeUSDC)
 
 	return service, nil
 }
@@ -159,7 +159,7 @@ func (s *EthereumBlockchainService) CreateGame(gameID string, stakeAmount *big.I
 
 	// Use provided stake amount or default
 	if stakeAmount == nil {
-		stakeAmount = s.defaultStakeWei
+		stakeAmount = s.defaultStakeUSDC
 	}
 
 	// Get fresh nonce
@@ -280,7 +280,7 @@ func (s *EthereumBlockchainService) StakeOnVote(gameID string, player common.Add
 
 	// Use default stake amount if not provided
 	if stakeAmount == nil {
-		stakeAmount = s.defaultStakeWei
+		stakeAmount = s.defaultStakeUSDC
 	}
 
 	// Create a new auth instance for the player transaction

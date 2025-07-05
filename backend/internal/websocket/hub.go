@@ -746,7 +746,7 @@ func (h *Hub) handleGameEnd(gameID, winner, reason string, gameStats map[string]
 				TotalVotes:    player["totalVotes"].(int),
 				TotalSpent:    player["totalSpent"].(float64),
 			}
-			log.Printf("White player %d: %s - %d votes, %.3f ETH", i+1,
+			log.Printf("White player %d: %s - %d votes, %.3f USDC", i+1,
 				player["walletAddress"].(string), player["totalVotes"].(int), player["totalSpent"].(float64))
 		}
 	} else {
@@ -762,7 +762,7 @@ func (h *Hub) handleGameEnd(gameID, winner, reason string, gameStats map[string]
 				TotalVotes:    player["totalVotes"].(int),
 				TotalSpent:    player["totalSpent"].(float64),
 			}
-			log.Printf("Black player %d: %s - %d votes, %.3f ETH", i+1,
+			log.Printf("Black player %d: %s - %d votes, %.3f USDC", i+1,
 				player["walletAddress"].(string), player["totalVotes"].(int), player["totalSpent"].(float64))
 		}
 	} else {
