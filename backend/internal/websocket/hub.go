@@ -32,6 +32,9 @@ const (
 	TypeGetValidMoves            = "get_valid_moves"
 	TypeValidMovesResponse       = "valid_moves_response"
 	TypeError                    = "error"
+	TypeRequestPermit2           = "request_permit2"
+	TypePermit2Data              = "permit2_data"
+	TypeSubmitPermit2Signature   = "submit_permit2_signature"
 )
 
 // GameInfo holds summary information about a single game
@@ -76,6 +79,8 @@ type Message struct {
 	Filter           string         `json:"filter,omitempty"`     // "active", "ended", or "" for all
 	Error            string         `json:"error,omitempty"`      // Error message
 	ValidMoves       []string       `json:"validMoves,omitempty"` // List of valid moves in coordinate notation
+	Signature        string         `json:"signature,omitempty"`  // Permit2 signature
+	TypedData        interface{}    `json:"typedData,omitempty"`  // EIP-712 typed data
 
 	// Game statistics
 	WhitePlayers          int             `json:"whitePlayers,omitempty"`
@@ -551,6 +556,60 @@ func (h *Hub) handleMessage(msg *Message, client *Client) {
 			default:
 			}
 		}
+
+	case TypeRequestPermit2:
+		walletAddress := msg.WalletAddress
+		if walletAddress == "" {
+			log.Printf("No wallet address provided for permit2 request from client %s", client.id)
+			h.sendErrorToClient(client, "Wallet address is required for permit2 request")
+			return
+		}
+
+		// Store the wallet address mapping for this client
+		h.clientWallets[client] = walletAddress
+
+		permit2Data, err := h.gameManager.GeneratePermit2SignatureData(walletAddress)
+		if err != nil {
+			log.Printf("Failed to generate permit2 data for wallet %s: %v", walletAddress, err)
+			h.sendErrorToClient(client, "Failed to generate permit2 data")
+			return
+		}
+
+		h.sendPermit2DataToClient(client, permit2Data)
+
+	case TypeSubmitPermit2Signature:
+		walletAddress := msg.WalletAddress
+		signature := msg.Signature
+
+		if walletAddress == "" {
+			log.Printf("No wallet address provided for permit2 signature from client %s", client.id)
+			h.sendErrorToClient(client, "Wallet address is required for permit2 signature")
+			return
+		}
+
+		if signature == "" {
+			log.Printf("No signature provided for permit2 signature from client %s", client.id)
+			h.sendErrorToClient(client, "Signature is required for permit2 signature")
+			return
+		}
+
+		// Store the permit2 signature
+		err := h.gameManager.StorePermit2Signature(walletAddress, signature)
+		if err != nil {
+			log.Printf("Failed to store permit2 signature for wallet %s: %v", walletAddress, err)
+			h.sendErrorToClient(client, "Failed to store permit2 signature")
+			return
+		}
+
+		// Execute the permit2 allowance
+		err = h.gameManager.ExecutePermit2(walletAddress)
+		if err != nil {
+			log.Printf("Failed to execute permit2 for wallet %s: %v", walletAddress, err)
+			h.sendErrorToClient(client, "Failed to execute permit2")
+			return
+		}
+
+		log.Printf("Successfully executed permit2 for wallet %s", walletAddress)
 	}
 }
 
@@ -1106,5 +1165,26 @@ func (h *Hub) sendErrorToClient(client *Client, errorMsg string) {
 		}
 	} else {
 		log.Printf("Failed to marshal error message for client %s: %v", client.id, err)
+	}
+}
+
+// sendPermit2DataToClient sends Permit2 typed data to a specific client
+func (h *Hub) sendPermit2DataToClient(client *Client, permit2Data interface{}) {
+	data, err := json.Marshal(map[string]interface{}{
+		"type":        TypePermit2Data,
+		"permit2Data": permit2Data,
+	})
+
+	if err != nil {
+		log.Printf("Failed to marshal permit2 data for client %s: %v", client.id, err)
+		h.sendErrorToClient(client, "Failed to generate permit2 data")
+		return
+	}
+
+	select {
+	case client.send <- data:
+		log.Printf("Successfully sent permit2 data to client %s", client.id)
+	default:
+		log.Printf("Failed to send permit2 data to client %s: channel full", client.id)
 	}
 }

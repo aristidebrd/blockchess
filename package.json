@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "anvil": "anvil --fork-url https://base-sepolia.g.alchemy.com/v2/Kv5V9_Sv55ZosXpoVga3IfXYO6JV9gNJ --block-time 1",
+    "anvil:debug": "anvil --fork-url https://base-sepolia.g.alchemy.com/v2/Kv5V9_Sv55ZosXpoVga3IfXYO6JV9gNJ --block-time 5 --enable-trace-printing --gas-limit 30000000",
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",

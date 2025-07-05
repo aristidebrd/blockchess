@@ -48,11 +48,9 @@ interface IVaultContract {
     );
 
     // Core Functions
-    function stake(uint256 gameId, uint256 fixedStakeAmount) external payable;
+    function stake(uint256 gameId, uint256 fixedStakeAmount) external;
 
     function endGame(uint256 gameId, GameResult result) external;
-
-    function claimRewards(uint256 gameId) external;
 
     // View Functions
     function getGameVaultInfo(
@@ -72,9 +70,4 @@ interface IVaultContract {
     function getTotalGameStakes(uint256 gameId) external view returns (uint256);
 
     function isGameEnded(uint256 gameId) external view returns (bool);
-
-    function canClaimRewards(
-        uint256 gameId,
-        address player
-    ) external view returns (bool);
 }

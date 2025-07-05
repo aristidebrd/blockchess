@@ -8,6 +8,7 @@ import "../src/VaultContract.sol";
 contract DeployVaultSystem is Script {
     // Deployment addresses will be loaded from environment
     address public goBackendAddress;
+    address public usdcTokenAddress;
 
     // Deployed contract addresses
     GameContract public gameContract;
@@ -50,6 +51,10 @@ contract DeployVaultSystem is Script {
             console.log("Deploying to Base Sepolia (84532)");
         }
 
+        // Get USDC token address from environment
+        usdcTokenAddress = vm.envAddress("USDC_TOKEN_ADDRESS");
+        require(usdcTokenAddress != address(0), "USDC_TOKEN_ADDRESS not set");
+
         // Deploy Game Contract
         gameContract = new GameContract(goBackendAddress);
         console.log("GameContract deployed at:", address(gameContract));
@@ -57,7 +62,8 @@ contract DeployVaultSystem is Script {
         // Deploy Vault Contract
         vaultContract = new VaultContract(
             goBackendAddress,
-            address(gameContract)
+            address(gameContract),
+            usdcTokenAddress
         );
         console.log("VaultContract deployed at:", address(vaultContract));
     }
@@ -72,10 +78,15 @@ contract DeployVaultSystem is Script {
             "GAME_CONTRACT_ADDRESS not set"
         );
 
+        // Get USDC token address from environment
+        usdcTokenAddress = vm.envAddress("USDC_TOKEN_ADDRESS");
+        require(usdcTokenAddress != address(0), "USDC_TOKEN_ADDRESS not set");
+
         // Deploy Vault Contract
         vaultContract = new VaultContract(
             goBackendAddress,
-            gameContractAddress
+            gameContractAddress,
+            usdcTokenAddress
         );
         console.log("VaultContract deployed at:", address(vaultContract));
     }

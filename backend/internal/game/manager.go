@@ -431,16 +431,19 @@ func (m *Manager) VoteForMove(gameID, walletAddress, move string, team string) e
 	if m.blockchainService != nil && m.blockchainService.IsConnected() {
 		go func() {
 			player := common.HexToAddress(walletAddress)
+
+			// Record the move
 			if err := m.blockchainService.RecordMove(gameID, player, 31337); err != nil {
 				log.Printf("Error recording move on blockchain: %v", err)
 			}
-			log.Printf("Recorded move on blockchain for player %s in game %s", walletAddress, gameID)
-			// Stake money in vault when voting
-			stakeAmount := big.NewInt(10000) // 0.01 USDC
+
+			// Stake USDC from player's approved allowance
+			stakeAmount := big.NewInt(10000) // 0.01 USDC (6 decimals)
 			if err := m.blockchainService.StakeOnVote(gameID, player, stakeAmount); err != nil {
-				log.Printf("Error staking on vote for player %s: %v", walletAddress, err)
+				log.Printf("Error staking USDC from player %s: %v", walletAddress, err)
+			} else {
+				log.Printf("Successfully staked %s USDC from player %s in game %s", stakeAmount.String(), walletAddress, gameID)
 			}
-			log.Printf("Staked on vote for player %s in game %s", walletAddress, gameID)
 		}()
 	}
 
@@ -935,4 +938,79 @@ func (m *Manager) GetBlockchainService() BlockchainService {
 // SetBlockchainService sets the blockchain service (for testing)
 func (m *Manager) SetBlockchainService(service BlockchainService) {
 	m.blockchainService = service
+}
+
+// GetPlayerApprovalStatus returns the approval status for a player
+func (m *Manager) GetPlayerApprovalStatus(gameID, walletAddress string) (bool, string, error) {
+	if m.blockchainService == nil || !m.blockchainService.IsConnected() {
+		return false, "blockchain service not available", nil
+	}
+
+	player := common.HexToAddress(walletAddress)
+	approved, allowance, err := m.blockchainService.CheckPlayerApproval(gameID, player)
+	if err != nil {
+		return false, "", err
+	}
+
+	if !approved {
+		return false, "player must approve game participation", nil
+	}
+
+	minRequired := big.NewInt(1000000) // 1 USDC
+	if allowance.Cmp(minRequired) < 0 {
+		return false, fmt.Sprintf("insufficient USDC allowance: has %s, needs %s", allowance.String(), minRequired.String()), nil
+	}
+
+	return true, "approved", nil
+}
+
+// GeneratePermit2SignatureData generates Permit2 typed data for signing
+func (m *Manager) GeneratePermit2SignatureData(walletAddress string) (interface{}, error) {
+	if m.blockchainService == nil {
+		return nil, fmt.Errorf("blockchain service not available")
+	}
+
+	playerAddr := common.HexToAddress(walletAddress)
+
+	// Cast to EthereumBlockchainService to access Permit2 method
+	ethService, ok := m.blockchainService.(*EthereumBlockchainService)
+	if !ok {
+		return nil, fmt.Errorf("blockchain service does not support Permit2")
+	}
+
+	return ethService.GeneratePermit2SignatureData(playerAddr)
+}
+
+// StorePermit2Signature stores a signed Permit2 signature for a player
+func (m *Manager) StorePermit2Signature(walletAddress, signature string) error {
+	if m.blockchainService == nil {
+		return fmt.Errorf("blockchain service not available")
+	}
+
+	playerAddr := common.HexToAddress(walletAddress)
+
+	// Cast to EthereumBlockchainService to access Permit2 method
+	ethService, ok := m.blockchainService.(*EthereumBlockchainService)
+	if !ok {
+		return fmt.Errorf("blockchain service does not support Permit2")
+	}
+
+	return ethService.StorePermit2Signature(playerAddr, signature)
+}
+
+// ExecutePermit2 executes a Permit2 allowance using the stored signature
+func (m *Manager) ExecutePermit2(walletAddress string) error {
+	if m.blockchainService == nil {
+		return fmt.Errorf("blockchain service not available")
+	}
+
+	playerAddr := common.HexToAddress(walletAddress)
+
+	// Cast to EthereumBlockchainService to access Permit2 method
+	ethService, ok := m.blockchainService.(*EthereumBlockchainService)
+	if !ok {
+		return fmt.Errorf("blockchain service does not support Permit2")
+	}
+
+	return ethService.ExecutePermit2(playerAddr)
 }

@@ -4,6 +4,7 @@
 export GO_BACKEND_ADDRESS=0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266
 export RPC_URL=http://127.0.0.1:8545
 export PRIVATE_KEY=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
+export USDC_TOKEN_ADDRESS=0x036CbD53842c5426634e7929541eC2318f3dCF7e
 
 echo "🚀 Deploying BlockChess Contracts to Local Anvil"
 echo "================================================"

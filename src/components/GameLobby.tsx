@@ -4,6 +4,7 @@ import { useAccount } from 'wagmi';
 import { GameInfo, ChessPiece } from '../utils/chess';
 import { wsService } from '../services/websocket';
 import PlayerStatistics from './PlayerStatistics';
+import { ApprovalFlow } from './ApprovalFlow';
 
 interface GameLobbyProps {
   onJoinGame: (gameId: string, side?: 'white' | 'black' | 'spectator') => void;
@@ -421,6 +422,8 @@ const GameLobby: React.FC<GameLobbyProps> = ({ onJoinGame, onStartMatchmaking, o
   const [matchmakingTime, setMatchmakingTime] = useState(0);
   const [copiedGameId, setCopiedGameId] = useState<string | null>(null);
   const [currentFilter, setCurrentFilter] = useState<'active' | 'ended' | 'all'>('all');
+  const [showApprovalFlow, setShowApprovalFlow] = useState(false);
+  const [approvalGameId, setApprovalGameId] = useState<string>('');
 
   // Track matchmaking time
   useEffect(() => {
@@ -436,14 +439,26 @@ const GameLobby: React.FC<GameLobbyProps> = ({ onJoinGame, onStartMatchmaking, o
     }
   }, [matchmakingStartTime]);
 
-
-
   const handleMatchmaking = () => {
     if (!isConnected) {
       alert('Please connect your wallet to start matchmaking');
       return;
     }
+
+    // Show approval flow first
+    setShowApprovalFlow(true);
+  };
+
+  const handleApprovalComplete = (permitSignature: string) => {
+    setShowApprovalFlow(false);
+    console.log('Permit signed:', permitSignature);
+    // Now start matchmaking
     onStartMatchmaking();
+  };
+
+  const handleApprovalCancel = () => {
+    setShowApprovalFlow(false);
+    setApprovalGameId('');
   };
 
   const handleFilterChange = (filter: 'active' | 'ended' | 'all') => {
@@ -1072,6 +1087,17 @@ const GameLobby: React.FC<GameLobbyProps> = ({ onJoinGame, onStartMatchmaking, o
             handleWatchGame(gameId);
           }}
         />
+      )}
+
+      {showApprovalFlow && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-gray-900 rounded-lg p-6 max-w-md w-full mx-4">
+            <ApprovalFlow
+              onApprovalComplete={handleApprovalComplete}
+              onCancel={handleApprovalCancel}
+            />
+          </div>
+        </div>
       )}
     </main>
   );

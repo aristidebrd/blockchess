@@ -92,16 +92,23 @@ export interface ValidMovesResponse {
     validMoves: string[];
 }
 
-export type ServerMessage = VoteUpdate | MoveResult | TimerTick | MatchFound | GamesList | GamesListUpdate | TotalNumberOfPlayers | ClientConnected | ErrorMessage | PlayerStatus | ValidMovesResponse;
+export interface Permit2Data {
+    type: 'permit2_data';
+    permit2Data: any; // The EIP-712 typed data structure
+}
+
+export type ServerMessage = VoteUpdate | MoveResult | TimerTick | MatchFound | GamesList | GamesListUpdate | TotalNumberOfPlayers | ClientConnected | ErrorMessage | PlayerStatus | ValidMovesResponse | Permit2Data;
 
 export interface ClientMessage {
-    type: 'join_game' | 'vote_move' | 'join_team' | 'watch_game' | 'join_matchmaking' | 'leave_matchmaking' | 'request_games_list' | 'request_filtered_games_list' | 'check_player_status' | 'get_valid_moves';
+    type: 'join_game' | 'vote_move' | 'join_team' | 'watch_game' | 'join_matchmaking' | 'leave_matchmaking' | 'request_games_list' | 'request_filtered_games_list' | 'check_player_status' | 'get_valid_moves' | 'request_permit2' | 'submit_permit2_signature';
     gameId?: string;
     move?: string;
     team?: 'white' | 'black';
     playerId?: string;
     walletAddress?: string;
     filter?: string;
+    signature?: string;
+    typedData?: any;
 }
 
 export class WebSocketService {
@@ -279,6 +286,21 @@ export class WebSocketService {
         this.send({
             type: 'get_valid_moves',
             gameId: gameId
+        });
+    }
+
+    public requestPermit2(walletAddress: string) {
+        this.send({
+            type: 'request_permit2',
+            walletAddress
+        });
+    }
+
+    public submitPermit2Signature(walletAddress: string, signature: string) {
+        this.send({
+            type: 'submit_permit2_signature',
+            walletAddress,
+            signature
         });
     }
 
