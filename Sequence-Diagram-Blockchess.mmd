@@ -1,0 +1,32 @@
+sequenceDiagram
+  participant Player as Player
+  participant Backend as Backend
+  participant Factory as Factory (Base)
+  participant Game as Game (Base)
+  participant VaultX/Y/Z as VaultX/Y/Z (Chain X/Y/Z)
+  participant VaultBase as Vault (Base)
+  participant CCTP as Circle CCTPv2 Router
+
+  %% New game if needed
+  Player->>Backend: Request new game
+  Backend->>Factory: Create game
+  Factory->>Game: Deploy Game contract
+
+  %% During the game: repeated for each local Vault
+  loop Each move
+    Player->>VaultX/Y/Z: Deposit $0.02 (Chain X/Y/Z)
+    VaultX/Y/Z-->>Backend: Deposit detected
+    Backend->>VaultX/Y/Z: Verify tx valid
+    Backend->>Game: Notify "valid move"
+    Game->>Game: Update state & scores
+  end
+
+  %% End of game: aggregate funds
+  Backend->>Game: Trigger end of game + compute winners
+  Backend->>VaultX/Y/Z: Unlock funds Chain X/Y/Z
+  VaultX/Y/Z->>VaultBase: Bridge via CCTPv2 → Vault Base
+  VaultBase->>Backend: Confirm aggregated receipt
+  Backend->>Game: Order payout
+  Game->>VaultBase: Order payouts to winners
+  VaultBase->>CCTP: Execute cross-chain batch payouts
+  CCTP->>Player: Send rewards on player chain
