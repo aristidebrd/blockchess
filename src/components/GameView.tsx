@@ -240,7 +240,7 @@ const GameView: React.FC<GameViewProps> = ({
                                             <div
                                                 className="bg-yellow-400 h-2 rounded-full transition-all duration-1000"
                                                 style={{
-                                                    width: `${Math.max(0, (backendGameState.timeRemaining / 30000) * 100)}%`
+                                                    width: `${Math.max(0, (backendGameState.timeRemaining / 15000) * 100)}%`
                                                 }}
                                             />
                                         </div>

@@ -214,8 +214,8 @@ class GameService {
             currentMove: 1,
             currentTurn: 'white',
             turnStartTime: Date.now(),
-            turnTimeLimit: 10000,
-            timeRemaining: 10000,
+            turnTimeLimit: 15000,
+            timeRemaining: 15000,
             spectators: 0,
             createdAt: new Date(),
             gameStartTime: undefined,
@@ -288,8 +288,13 @@ class GameService {
                     this.currentGameState.currentMove = data.currentMove;
                 }
 
-                // Reset timer for new turn
-                this.currentGameState.timeRemaining = 10000;
+                // Reset timer for new turn using value from backend
+                if (data.secondsLeft !== undefined) {
+                    this.currentGameState.timeRemaining = data.secondsLeft * 1000;
+                } else {
+                    // Fallback for safety, though backend should always send it now
+                    this.currentGameState.timeRemaining = 15000;
+                }
                 this.currentGameState.turnStartTime = Date.now();
 
                 this.notifyGameStateUpdate();

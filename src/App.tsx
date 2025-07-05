@@ -107,7 +107,7 @@ function App() {
       turnTimeLimit: 10000,
       timeRemaining: wsGame.timeLeft * 1000,
       spectators: wsGame.spectators,
-      createdAt: new Date(), // Backend doesn't provide this yet
+      createdAt: wsGame.createdAt ? new Date(wsGame.createdAt * 1000) : new Date(), // Convert Unix timestamp to Date
       whitePlayers: wsGame.whitePlayers,
       blackPlayers: wsGame.blackPlayers,
       proposedMoves: [],

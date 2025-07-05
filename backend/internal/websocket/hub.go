@@ -49,6 +49,7 @@ type GameInfo struct {
 	Status       string     `json:"status"`              // "active" or "ended"
 	Winner       string     `json:"winner,omitempty"`    // "white", "black", "draw" (only for ended games)
 	EndReason    string     `json:"endReason,omitempty"` // "checkmate", "stalemate", etc. (only for ended games)
+	CreatedAt    int64      `json:"createdAt"`           // Unix timestamp when game was created
 	EndedAt      *int64     `json:"endedAt,omitempty"`   // Unix timestamp when game ended
 	Board        [][]string `json:"board,omitempty"`     // Current board state
 
@@ -846,6 +847,7 @@ func (h *Hub) handleGameEnd(gameID, winner, reason string, gameStats map[string]
 		Status:    "ended",
 		Winner:    winner,
 		EndReason: reason,
+		CreatedAt: h.gameManager.GetGameCreatedAt(gameID),
 		EndedAt:   func() *int64 { t := time.Now().Unix(); return &t }(),
 	}
 
@@ -952,6 +954,7 @@ func (h *Hub) collectGamesInfo(filter string) []GameInfo {
 			gameInfo := GameInfo{
 				GameID:     gameID,
 				Status:     "active",
+				CreatedAt:  h.gameManager.GetGameCreatedAt(gameID),
 				Spectators: spectators,
 			}
 

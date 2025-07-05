@@ -220,7 +220,7 @@ blockchess/
 ## 🔧 Configuration
 
 - **Backend port**: Change with `-addr` flag (default: `:8080`)
-- **Turn duration**: Modify `TimeLeft` in `backend/internal/game/manager.go` (default: 30 seconds)
+- **Turn duration**: Modify `TimeLeft` in `backend/internal/game/manager.go` (default: 15 seconds)
 - **Game ID**: Currently hardcoded as "game-123" in the frontend
 
 ## 🚢 Deployment

@@ -814,180 +814,135 @@ const GameLobby: React.FC<GameLobbyProps> = ({ onJoinGame, onStartMatchmaking, o
 
       {/* Games Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
-        {games.map((game) => {
-          const gameAge = getGameAgeMinutes(game);
-          const isTooOld = gameAge > 7 && game.status === 'active';
+        {games
+          .slice()
+          .sort((a, b) => {
+            // Sort by creation time (most recent first)
+            const aCreatedAt = a.createdAt ? a.createdAt.getTime() : 0;
+            const bCreatedAt = b.createdAt ? b.createdAt.getTime() : 0;
+            return bCreatedAt - aCreatedAt;
+          })
+          .map((game) => {
+            const gameAge = getGameAgeMinutes(game);
+            const isTooOld = gameAge > 7 && game.status === 'active';
 
-          // Get cached player status if available
-          const playerStatusKey = address ? `${game.id}-${address}` : null;
-          const playerStatus = playerStatusKey ? playerStatusCache[playerStatusKey] : null;
+            // Get cached player status if available
+            const playerStatusKey = address ? `${game.id}-${address}` : null;
+            const playerStatus = playerStatusKey ? playerStatusCache[playerStatusKey] : null;
 
-          return (
-            <div
-              key={game.id}
-              className="bg-gradient-to-br from-gray-800 via-gray-900 to-black rounded-2xl border border-gray-700 hover:border-gray-600 transition-all duration-300 shadow-xl hover:shadow-2xl transform hover:scale-[1.02] overflow-hidden"
-            >
-              {/* Header with Status and Time */}
-              <div className="p-4 border-b border-gray-700/50 bg-gradient-to-r from-gray-800/50 to-gray-900/50">
-                {/* First row: Finished, Move 4, Share, 13m ago */}
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center space-x-6">
-                    {getGameStatusBadge(game)}
-                    <div className="flex items-center space-x-1 text-gray-400 text-sm">
-                      <Timer className="w-3 h-3" />
-                      <span>Move {game.currentMove}</span>
+            return (
+              <div
+                key={game.id}
+                className="bg-gradient-to-br from-gray-800 via-gray-900 to-black rounded-2xl border border-gray-700 hover:border-gray-600 transition-all duration-300 shadow-xl hover:shadow-2xl transform hover:scale-[1.02] overflow-hidden"
+              >
+                {/* Header with Status and Time */}
+                <div className="p-4 border-b border-gray-700/50 bg-gradient-to-r from-gray-800/50 to-gray-900/50">
+                  {/* First row: Finished, Move 4, Share, 13m ago */}
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center space-x-6">
+                      {getGameStatusBadge(game)}
+                      <div className="flex items-center space-x-1 text-gray-400 text-sm">
+                        <Timer className="w-3 h-3" />
+                        <span>Move {game.currentMove}</span>
+                      </div>
+                      <button
+                        onClick={() => copyGameURL(game.id)}
+                        className="flex items-center space-x-1 text-gray-400 hover:text-white text-sm transition-colors duration-200 hover:bg-gray-700 px-2 py-1 rounded"
+                        title="Copy game URL"
+                      >
+                        {copiedGameId === game.id ? (
+                          <>
+                            <ExternalLink className="w-3 h-3" />
+                            <span>Copied!</span>
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="w-3 h-3" />
+                            <span>Share</span>
+                          </>
+                        )}
+                      </button>
                     </div>
-                    <button
-                      onClick={() => copyGameURL(game.id)}
-                      className="flex items-center space-x-1 text-gray-400 hover:text-white text-sm transition-colors duration-200 hover:bg-gray-700 px-2 py-1 rounded"
-                      title="Copy game URL"
-                    >
-                      {copiedGameId === game.id ? (
+                    <div className="text-gray-400 text-sm">
+                      {formatTimeAgo(game.createdAt || new Date())}
+                    </div>
+                  </div>
+
+                  {/* Second row: Black wins */}
+                  <div className="flex items-center justify-between mb-2">
+                    {/* Winner badge is now rendered in the main content area */}
+                  </div>
+
+                  {/* Team boxes */}
+                  <div className="grid grid-cols-2 gap-2">
+                    {/* White Team Box */}
+                    <div className="bg-gradient-to-br from-gray-700/30 to-gray-900/30 rounded-lg p-3 border border-gray-600/50 flex items-center space-x-3">
+                      <div className="w-3 h-3 bg-white rounded-full flex-shrink-0" />
+                      <div>
+                        <div className="text-white font-bold text-xs">{game.whitePlayers} players</div>
+                        <div className="text-gray-200 text-xs">{game.whitePot.toFixed(2)} USDC</div>
+                      </div>
+                    </div>
+
+                    {/* Black Team Box */}
+                    <div className="bg-gradient-to-br from-gray-700/30 to-gray-900/30 rounded-lg p-3 border border-gray-600/50 flex items-center space-x-3">
+                      <div className="w-3 h-3 bg-gray-600 rounded-full flex-shrink-0" />
+                      <div>
+                        <div className="text-gray-300 font-bold text-xs">{game.blackPlayers} players</div>
+                        <div className="text-gray-300 text-xs">{game.blackPot.toFixed(2)} USDC</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Main Content */}
+                <div className="p-6">
+                  {/* Board and Stats Grid */}
+                  <div className="grid grid-cols-3 gap-4 items-center">
+                    <div className="col-span-2">
+                      <BoardPreview
+                        boardState={game.boardState}
+                        onClick={() => openBoardModal(game)}
+                      />
+                    </div>
+
+                    {/* Stat boxes for active or finished games */}
+                    <div className="col-span-1 flex flex-col space-y-2">
+                      {(game.status === 'completed' || game.status === 'ended') && getWinnerBadge(game)}
+                      {game.status === 'active' && (
                         <>
-                          <ExternalLink className="w-3 h-3" />
-                          <span>Copied!</span>
-                        </>
-                      ) : (
-                        <>
-                          <Copy className="w-3 h-3" />
-                          <span>Share</span>
+                          <div className="bg-gradient-to-br from-blue-900/30 to-blue-800/30 rounded-lg p-2 text-center border border-blue-500/20">
+                            <div className="text-blue-400 font-bold text-xs">{game.spectators} Spectators</div>
+                          </div>
                         </>
                       )}
-                    </button>
-                  </div>
-                  <div className="text-gray-400 text-sm">
-                    {formatTimeAgo(game.createdAt || new Date())}
-                  </div>
-                </div>
+                      <div className="bg-gradient-to-br from-green-900/30 to-green-800/30 rounded-lg p-2 text-center border border-green-500/20">
+                        <div className="text-green-400 font-bold text-xs">{game.totalPot.toFixed(2)} USDC</div>
+                        <div className="text-green-300 text-xs">Total Pot</div>
+                      </div>
 
-                {/* Second row: Black wins */}
-                <div className="flex items-center justify-between mb-2">
-                  {/* Winner badge is now rendered in the main content area */}
-                </div>
-
-                {/* Team boxes */}
-                <div className="grid grid-cols-2 gap-2">
-                  {/* White Team Box */}
-                  <div className="bg-gradient-to-br from-gray-700/30 to-gray-900/30 rounded-lg p-3 border border-gray-600/50 flex items-center space-x-3">
-                    <div className="w-3 h-3 bg-white rounded-full flex-shrink-0" />
-                    <div>
-                      <div className="text-white font-bold text-xs">{game.whitePlayers} players</div>
-                      <div className="text-gray-200 text-xs">{game.whitePot.toFixed(2)} USDC</div>
+                      {game.status === 'active' && (
+                        <>
+                          <div className="bg-gradient-to-br from-purple-900/30 to-purple-800/30 rounded-lg p-2 text-center border border-purple-500/20">
+                            <div className="text-purple-400 font-bold text-xs capitalize">{game.currentTurn} Turn</div>
+                          </div>
+                        </>
+                      )}
                     </div>
                   </div>
 
-                  {/* Black Team Box */}
-                  <div className="bg-gradient-to-br from-gray-700/30 to-gray-900/30 rounded-lg p-3 border border-gray-600/50 flex items-center space-x-3">
-                    <div className="w-3 h-3 bg-gray-600 rounded-full flex-shrink-0" />
-                    <div>
-                      <div className="text-gray-300 font-bold text-xs">{game.blackPlayers} players</div>
-                      <div className="text-gray-300 text-xs">{game.blackPot.toFixed(2)} USDC</div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Main Content */}
-              <div className="p-6">
-                {/* Board and Stats Grid */}
-                <div className="grid grid-cols-3 gap-4 items-center">
-                  <div className="col-span-2">
-                    <BoardPreview
-                      boardState={game.boardState}
-                      onClick={() => openBoardModal(game)}
-                    />
-                  </div>
-
-                  {/* Stat boxes for active or finished games */}
-                  <div className="col-span-1 flex flex-col space-y-2">
-                    {(game.status === 'completed' || game.status === 'ended') && getWinnerBadge(game)}
-                    {game.status === 'active' && (
-                      <>
-                        <div className="bg-gradient-to-br from-blue-900/30 to-blue-800/30 rounded-lg p-2 text-center border border-blue-500/20">
-                          <div className="text-blue-400 font-bold text-xs">{game.spectators} Spectators</div>
-                        </div>
-                      </>
-                    )}
-                    <div className="bg-gradient-to-br from-green-900/30 to-green-800/30 rounded-lg p-2 text-center border border-green-500/20">
-                      <div className="text-green-400 font-bold text-xs">{game.totalPot.toFixed(2)} USDC</div>
-                      <div className="text-green-300 text-xs">Total Pot</div>
-                    </div>
-
-                    {game.status === 'active' && (
-                      <>
-                        <div className="bg-gradient-to-br from-purple-900/30 to-purple-800/30 rounded-lg p-2 text-center border border-purple-500/20">
-                          <div className="text-purple-400 font-bold text-xs capitalize">{game.currentTurn} Turn</div>
-                        </div>
-                      </>
-                    )}
-                  </div>
-                </div>
-
-                {/* Action Buttons */}
-                <div className="space-y-3 mt-4">
-                  {game.status === 'active' && !isTooOld && (
-                    <div className="grid grid-cols-3 gap-2">
-                      <button
-                        onClick={() => {
-                          console.log('🔘 DEBUG: White button clicked!');
-                          handleJoinTeam(game.id, 'white');
-                        }}
-                        disabled={!isConnected || (playerStatus != null && playerStatus.team !== '' && playerStatus.team !== 'white')}
-                        className={`font-medium py-2 px-3 rounded-lg transition-all duration-200 text-sm shadow-lg hover:shadow-xl transform hover:scale-105 
-                          ${playerStatus && playerStatus.team === 'white'
-                            ? 'bg-gradient-to-r from-green-500 to-green-600 text-white hover:from-green-400 hover:to-green-500'
-                            : playerStatus && playerStatus.team !== '' && playerStatus.team !== 'white'
-                              ? 'bg-gray-400 text-gray-700 cursor-not-allowed'
-                              : 'bg-gradient-to-r from-white to-gray-100 text-black hover:from-gray-100 hover:to-gray-200'}`}
-                      >
-                        {playerStatus && playerStatus.team === 'white' ? 'Reconnect' : 'Join White'}
-                      </button>
-                      <button
-                        onClick={() => {
-                          console.log('🔘 DEBUG: Black button clicked!');
-                          handleJoinTeam(game.id, 'black');
-                        }}
-                        disabled={!isConnected || (playerStatus != null && playerStatus.team !== '' && playerStatus.team !== 'black')}
-                        className={`font-medium py-2 px-3 rounded-lg transition-all duration-200 text-sm shadow-lg hover:shadow-xl transform hover:scale-105 
-                          ${playerStatus && playerStatus.team === 'black'
-                            ? 'bg-gradient-to-r from-green-500 to-green-600 text-white hover:from-green-400 hover:to-green-500'
-                            : playerStatus && playerStatus.team !== '' && playerStatus.team !== 'black'
-                              ? 'bg-gray-400 text-gray-700 cursor-not-allowed'
-                              : 'bg-gradient-to-r from-gray-700 to-gray-800 text-white hover:from-gray-600 hover:to-gray-700'}`}
-                      >
-                        {playerStatus && playerStatus.team === 'black' ? 'Reconnect' : 'Join Black'}
-                      </button>
-                      <button
-                        onClick={() => {
-                          console.log('🔘 DEBUG: Watch button clicked!');
-                          handleWatchGame(game.id);
-                        }}
-                        className="bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-500 hover:to-blue-600 text-white font-medium py-2 px-3 rounded-lg transition-all duration-200 text-sm shadow-lg hover:shadow-xl transform hover:scale-105 flex items-center justify-center space-x-1"
-                      >
-                        <Eye className="w-3 h-3" />
-                        <span>Watch</span>
-                      </button>
-                    </div>
-                  )}
-
-                  {game.status === 'active' && isTooOld && (
-                    <button
-                      onClick={() => handleWatchGame(game.id)}
-                      className="w-full bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-500 hover:to-blue-600 text-white font-medium py-2 px-3 rounded-lg transition-all duration-200 text-sm shadow-lg hover:shadow-xl transform hover:scale-105 flex items-center justify-center space-x-2"
-                    >
-                      <Eye className="w-4 h-4" />
-                      <span>Watch Game</span>
-                    </button>
-                  )}
-
-                  {game.status === 'waiting' && (
-                    <div className="grid grid-cols-2 gap-2">
-                      {!game.whitePlayer && (
+                  {/* Action Buttons */}
+                  <div className="space-y-3 mt-4">
+                    {game.status === 'active' && !isTooOld && (
+                      <div className="grid grid-cols-3 gap-2">
                         <button
-                          onClick={() => handleJoinTeam(game.id, 'white')}
+                          onClick={() => {
+                            console.log('🔘 DEBUG: White button clicked!');
+                            handleJoinTeam(game.id, 'white');
+                          }}
                           disabled={!isConnected || (playerStatus != null && playerStatus.team !== '' && playerStatus.team !== 'white')}
-                          className={`font-medium py-3 px-4 rounded-lg transition-all duration-200 shadow-lg hover:shadow-xl transform hover:scale-105 
-                            ${playerStatus && playerStatus.team === 'white'
+                          className={`font-medium py-2 px-3 rounded-lg transition-all duration-200 text-sm shadow-lg hover:shadow-xl transform hover:scale-105 
+                          ${playerStatus && playerStatus.team === 'white'
                               ? 'bg-gradient-to-r from-green-500 to-green-600 text-white hover:from-green-400 hover:to-green-500'
                               : playerStatus && playerStatus.team !== '' && playerStatus.team !== 'white'
                                 ? 'bg-gray-400 text-gray-700 cursor-not-allowed'
@@ -995,13 +950,14 @@ const GameLobby: React.FC<GameLobbyProps> = ({ onJoinGame, onStartMatchmaking, o
                         >
                           {playerStatus && playerStatus.team === 'white' ? 'Reconnect' : 'Join White'}
                         </button>
-                      )}
-                      {!game.blackPlayer && (
                         <button
-                          onClick={() => handleJoinTeam(game.id, 'black')}
+                          onClick={() => {
+                            console.log('🔘 DEBUG: Black button clicked!');
+                            handleJoinTeam(game.id, 'black');
+                          }}
                           disabled={!isConnected || (playerStatus != null && playerStatus.team !== '' && playerStatus.team !== 'black')}
-                          className={`font-medium py-3 px-4 rounded-lg transition-all duration-200 shadow-lg hover:shadow-xl transform hover:scale-105 
-                            ${playerStatus && playerStatus.team === 'black'
+                          className={`font-medium py-2 px-3 rounded-lg transition-all duration-200 text-sm shadow-lg hover:shadow-xl transform hover:scale-105 
+                          ${playerStatus && playerStatus.team === 'black'
                               ? 'bg-gradient-to-r from-green-500 to-green-600 text-white hover:from-green-400 hover:to-green-500'
                               : playerStatus && playerStatus.team !== '' && playerStatus.team !== 'black'
                                 ? 'bg-gray-400 text-gray-700 cursor-not-allowed'
@@ -1009,24 +965,76 @@ const GameLobby: React.FC<GameLobbyProps> = ({ onJoinGame, onStartMatchmaking, o
                         >
                           {playerStatus && playerStatus.team === 'black' ? 'Reconnect' : 'Join Black'}
                         </button>
-                      )}
-                    </div>
-                  )}
+                        <button
+                          onClick={() => {
+                            console.log('🔘 DEBUG: Watch button clicked!');
+                            handleWatchGame(game.id);
+                          }}
+                          className="bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-500 hover:to-blue-600 text-white font-medium py-2 px-3 rounded-lg transition-all duration-200 text-sm shadow-lg hover:shadow-xl transform hover:scale-105 flex items-center justify-center space-x-1"
+                        >
+                          <Eye className="w-3 h-3" />
+                          <span>Watch</span>
+                        </button>
+                      </div>
+                    )}
 
-                  {(game.status === 'completed' || game.status === 'ended') && (
-                    <button
-                      onClick={() => openStatsModal(game)}
-                      className="w-full bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-500 hover:to-purple-600 text-white font-medium py-2 px-3 rounded-lg transition-all duration-200 text-sm flex items-center justify-center space-x-2 shadow-lg hover:shadow-xl transform hover:scale-105"
-                    >
-                      <Trophy className="w-4 h-4" />
-                      <span>View Game Statistics</span>
-                    </button>
-                  )}
+                    {game.status === 'active' && isTooOld && (
+                      <button
+                        onClick={() => handleWatchGame(game.id)}
+                        className="w-full bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-500 hover:to-blue-600 text-white font-medium py-2 px-3 rounded-lg transition-all duration-200 text-sm shadow-lg hover:shadow-xl transform hover:scale-105 flex items-center justify-center space-x-2"
+                      >
+                        <Eye className="w-4 h-4" />
+                        <span>Watch Game</span>
+                      </button>
+                    )}
+
+                    {game.status === 'waiting' && (
+                      <div className="grid grid-cols-2 gap-2">
+                        {!game.whitePlayer && (
+                          <button
+                            onClick={() => handleJoinTeam(game.id, 'white')}
+                            disabled={!isConnected || (playerStatus != null && playerStatus.team !== '' && playerStatus.team !== 'white')}
+                            className={`font-medium py-3 px-4 rounded-lg transition-all duration-200 shadow-lg hover:shadow-xl transform hover:scale-105 
+                            ${playerStatus && playerStatus.team === 'white'
+                                ? 'bg-gradient-to-r from-green-500 to-green-600 text-white hover:from-green-400 hover:to-green-500'
+                                : playerStatus && playerStatus.team !== '' && playerStatus.team !== 'white'
+                                  ? 'bg-gray-400 text-gray-700 cursor-not-allowed'
+                                  : 'bg-gradient-to-r from-white to-gray-100 text-black hover:from-gray-100 hover:to-gray-200'}`}
+                          >
+                            {playerStatus && playerStatus.team === 'white' ? 'Reconnect' : 'Join White'}
+                          </button>
+                        )}
+                        {!game.blackPlayer && (
+                          <button
+                            onClick={() => handleJoinTeam(game.id, 'black')}
+                            disabled={!isConnected || (playerStatus != null && playerStatus.team !== '' && playerStatus.team !== 'black')}
+                            className={`font-medium py-3 px-4 rounded-lg transition-all duration-200 shadow-lg hover:shadow-xl transform hover:scale-105 
+                            ${playerStatus && playerStatus.team === 'black'
+                                ? 'bg-gradient-to-r from-green-500 to-green-600 text-white hover:from-green-400 hover:to-green-500'
+                                : playerStatus && playerStatus.team !== '' && playerStatus.team !== 'black'
+                                  ? 'bg-gray-400 text-gray-700 cursor-not-allowed'
+                                  : 'bg-gradient-to-r from-gray-700 to-gray-800 text-white hover:from-gray-600 hover:to-gray-700'}`}
+                          >
+                            {playerStatus && playerStatus.team === 'black' ? 'Reconnect' : 'Join Black'}
+                          </button>
+                        )}
+                      </div>
+                    )}
+
+                    {(game.status === 'completed' || game.status === 'ended') && (
+                      <button
+                        onClick={() => openStatsModal(game)}
+                        className="w-full bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-500 hover:to-purple-600 text-white font-medium py-2 px-3 rounded-lg transition-all duration-200 text-sm flex items-center justify-center space-x-2 shadow-lg hover:shadow-xl transform hover:scale-105"
+                      >
+                        <Trophy className="w-4 h-4" />
+                        <span>View Game Statistics</span>
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
-            </div>
-          );
-        })}
+            );
+          })}
       </div>
 
       {games.length === 0 && (

@@ -26,7 +26,7 @@ const Timer: React.FC<TimerProps> = ({ duration, onTimeUp, isActive, onReset }) 
           onTimeUp();
           return 0;
         }
-        
+
         const newTime = prev - 1;
         setIsWarning(newTime <= 5);
         return newTime;
@@ -53,29 +53,27 @@ const Timer: React.FC<TimerProps> = ({ duration, onTimeUp, isActive, onReset }) 
             Voting Timer
           </h3>
         </div>
-        <div className={`text-2xl font-mono font-bold ${
-          isWarning ? 'text-red-400 animate-pulse' : 'text-white'
-        }`}>
+        <div className={`text-2xl font-mono font-bold ${isWarning ? 'text-red-400 animate-pulse' : 'text-white'
+          }`}>
           {String(minutes).padStart(2, '0')}:{String(seconds).padStart(2, '0')}
         </div>
       </div>
-      
+
       {/* Progress bar */}
       <div className="w-full bg-gray-700 rounded-full h-3 overflow-hidden">
         <div
-          className={`h-full transition-all duration-1000 ease-linear ${
-            isWarning 
-              ? 'bg-gradient-to-r from-red-500 to-red-600' 
-              : percentage > 50
-                ? 'bg-gradient-to-r from-green-500 to-green-600'
-                : percentage > 25
-                  ? 'bg-gradient-to-r from-yellow-500 to-yellow-600'
-                  : 'bg-gradient-to-r from-orange-500 to-red-500'
-          }`}
+          className={`h-full transition-all duration-1000 ease-linear ${isWarning
+            ? 'bg-gradient-to-r from-red-500 to-red-600'
+            : percentage > 50
+              ? 'bg-gradient-to-r from-green-500 to-green-600'
+              : percentage > 25
+                ? 'bg-gradient-to-r from-yellow-500 to-yellow-600'
+                : 'bg-gradient-to-r from-orange-500 to-red-500'
+            }`}
           style={{ width: `${percentage}%` }}
         />
       </div>
-      
+
       {/* Status text */}
       <div className="mt-3 text-center">
         <p className={`text-sm ${isWarning ? 'text-red-300' : 'text-gray-300'}`}>

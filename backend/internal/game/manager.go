@@ -12,6 +12,11 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 )
 
+// Constants
+const (
+	GameTimerSeconds = 15 // Timer duration in seconds for each turn
+)
+
 type Vote struct {
 	Move  string
 	Count int
@@ -24,6 +29,7 @@ type GameState struct {
 	Game        *chess.Game    // Chess game state from CorentinGS/chess library
 	Players     []string       // connected player IDs
 	CurrentMove int            // Current move number
+	CreatedAt   int64          // Unix timestamp when game was created
 
 	// Team tracking with wallet addresses
 	WhitePlayers map[string]bool // walletAddress -> true if on white team
@@ -120,10 +126,11 @@ func (m *Manager) GetOrCreateGame(gameID string) *GameState {
 	game := &GameState{
 		ID:                   gameID,
 		Votes:                make(map[string]int),
-		TimeLeft:             10, // 10 seconds per turn
+		TimeLeft:             GameTimerSeconds, // Use constant for timer duration
 		Game:                 chess.NewGame(),
 		Players:              make([]string, 0),
 		CurrentMove:          1,
+		CreatedAt:            time.Now().Unix(),
 		WhitePlayers:         make(map[string]bool),
 		BlackPlayers:         make(map[string]bool),
 		TotalPot:             0,
@@ -179,29 +186,62 @@ func (m *Manager) runGameTimer(game *GameState) {
 		game.mu.Lock()
 		game.TimeLeft--
 
-		if game.TimeLeft <= 0 {
-			// Time's up - execute the move with most votes
-			bestMove := m.getBestMove(game)
-
-			// Apply the move to the board if it's not "skip"
-			moveApplied := false
-			if bestMove != "skip" {
-				m.applyMoveToBoard(game, bestMove)
-				moveApplied = true
+		// Check if we should execute the move early (when only 1 player on current team)
+		shouldExecuteEarly := false
+		if game.TimeLeft <= GameTimerSeconds-1 { // After 1 second (started at GameTimerSeconds)
+			currentTurn := game.Game.Position().Turn()
+			var currentTeamPlayerCount int
+			if currentTurn == chess.White {
+				currentTeamPlayerCount = len(game.WhitePlayers)
+			} else {
+				currentTeamPlayerCount = len(game.BlackPlayers)
 			}
 
+			// If only 1 player on current team AND there's at least one vote, execute after 1 second
+			if currentTeamPlayerCount == 1 && len(game.Votes) > 0 {
+				shouldExecuteEarly = true
+			}
+		}
+
+		if game.TimeLeft <= 0 || shouldExecuteEarly {
+			// Time's up or early execution - execute the move with most votes
+			bestMove := m.getBestMove(game)
+
+			// If no votes were cast, the current team forfeits the game.
+			if bestMove == "skip" {
+				currentTurn := game.Game.Position().Turn()
+				game.Game.Resign(currentTurn) // This sets the game outcome
+				log.Printf("Game %s: Team %s forfeited due to inactivity.", game.ID, currentTurn.String())
+
+				// Get final stats before unlocking
+				gameStats := m.getGameStatsUnsafe(game, true)
+				game.mu.Unlock()
+
+				// Handle game end logic (blockchain update, broadcast)
+				m.handleGameEnd(game.ID, gameStats)
+				log.Printf("Game %s timer stopped due to forfeit.", game.ID)
+				return // Stop the timer goroutine for this game
+			}
+
+			// Apply the move to the board if it's not "skip"
+			m.applyMoveToBoard(game, bestMove)
+
 			// Check if the game ended after this move
-			gameEnded := moveApplied && m.checkGameEnd(game)
+			gameEnded := m.checkGameEnd(game)
 
 			// Reset for next turn immediately to prevent race conditions
 			game.Votes = make(map[string]int)
-			game.TimeLeft = 10
+			game.TimeLeft = GameTimerSeconds // Reset to constant value
 			game.CurrentMove++
 
 			// Reset round vote tracking
 			game.WhiteVotesThisTurn = 0
 			game.BlackVotesThisTurn = 0
 			game.PlayerVotedThisRound = make(map[string]bool)
+
+			if shouldExecuteEarly {
+				log.Printf("Game %s: Move executed early due to single player on team", game.ID)
+			}
 
 			game.mu.Unlock()
 
@@ -809,6 +849,22 @@ func (m *Manager) GetPlayerTeam(gameID, walletAddress string) string {
 		return "black"
 	}
 	return ""
+}
+
+// GetGameCreatedAt returns the creation timestamp of a game
+func (m *Manager) GetGameCreatedAt(gameID string) int64 {
+	m.mu.RLock()
+	game, exists := m.games[gameID]
+	m.mu.RUnlock()
+
+	if !exists {
+		return 0
+	}
+
+	game.mu.RLock()
+	defer game.mu.RUnlock()
+
+	return game.CreatedAt
 }
 
 // applyMoveToBoard applies a move to the chess board
