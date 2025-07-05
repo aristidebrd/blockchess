@@ -1,7 +1,8 @@
 #!/bin/bash
 
 # Create backend directory
-mkdir -p backend/contracts
+mkdir -p backend/contracts/gamecontract
+mkdir -p backend/contracts/vaultcontract
 
 # Extract ABI from compiled contracts and generate Go bindings
 echo "Generating GameContract bindings..."
