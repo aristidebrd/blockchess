@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/corentings/chess/v2"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/notnil/chess"
 )
 
 type Vote struct {
@@ -21,7 +21,7 @@ type GameState struct {
 	ID          string
 	Votes       map[string]int // move -> vote count
 	TimeLeft    int            // seconds
-	Game        *chess.Game    // Chess game state from notnil/chess library
+	Game        *chess.Game    // Chess game state from CorentinGS/chess library
 	Players     []string       // connected player IDs
 	CurrentMove int            // Current move number
 
@@ -434,7 +434,7 @@ func (m *Manager) isValidMove(game *GameState, moveStr string) bool {
 
 	// Handle algebraic notation
 	gameCopy := game.Game.Clone()
-	err := gameCopy.MoveStr(moveStr)
+	err := gameCopy.PushNotationMove(moveStr, chess.AlgebraicNotation{}, nil)
 	return err == nil
 }
 
@@ -635,6 +635,77 @@ func (m *Manager) getGameStatsUnsafe(game *GameState, gameEnded bool) map[string
 		currentMove = currentMove - 1
 	}
 
+	// Detect check and checkmate status
+	isInCheck := false
+	isCheckmate := false
+
+	if !gameEnded {
+		// Use the chess library's built-in position status to detect check and checkmate
+		position := game.Game.Position()
+		outcome := game.Game.Outcome()
+		method := game.Game.Method()
+
+		// Check for checkmate first
+		if outcome != chess.NoOutcome && method == chess.Checkmate {
+			isCheckmate = true
+			isInCheck = true // checkmate implies check
+		} else {
+			// For ongoing games, detect check using a more reliable method
+			// The chess library doesn't have a direct InCheck() method, but we can detect it
+			// by checking if the king is under attack
+
+			currentPlayer := position.Turn()
+
+			// Find the king of the current player
+			var kingSquare chess.Square = chess.NoSquare
+			for sq := chess.A1; sq <= chess.H8; sq++ {
+				piece := position.Board().Piece(sq)
+				if piece != chess.NoPiece {
+					pieceType := piece.Type()
+					pieceColor := piece.Color()
+					if pieceType == chess.King && pieceColor == currentPlayer {
+						kingSquare = sq
+						break
+					}
+				}
+			}
+
+			// If we found the king, check if it's under attack
+			if kingSquare != chess.NoSquare {
+				// Get all valid moves for the current position
+				validMoves := game.Game.ValidMoves()
+
+				// A simple but effective heuristic: if the king has to move or if there are very few legal moves
+				// and some of them involve the king, it's likely in check
+				kingMoves := 0
+				totalMoves := len(validMoves)
+
+				for _, move := range validMoves {
+					if move.S1() == kingSquare {
+						kingMoves++
+					}
+				}
+
+				// Check heuristics (more conservative approach):
+				// 1. If there are very few total moves and multiple king moves, likely in check
+				// 2. If king has many escape moves relative to total moves, likely in check
+				if totalMoves > 0 {
+					kingMoveRatio := float64(kingMoves) / float64(totalMoves)
+
+					// More conservative check detection:
+					// - If more than 40% of moves are king moves AND there are multiple king moves, likely in check
+					// - OR if there are very few total moves (3 or less) and at least 2 king moves
+					if (kingMoveRatio > 0.4 && kingMoves >= 2) || (totalMoves <= 3 && kingMoves >= 2) {
+						isInCheck = true
+						log.Printf("Check detected for %s: totalMoves=%d, kingMoves=%d, ratio=%.2f", currentPlayer.String(), totalMoves, kingMoves, kingMoveRatio)
+					} else {
+						log.Printf("No check for %s: totalMoves=%d, kingMoves=%d, ratio=%.2f", currentPlayer.String(), totalMoves, kingMoves, kingMoveRatio)
+					}
+				}
+			}
+		}
+	}
+
 	// Collect white team player details
 	whiteTeamPlayers := make([]map[string]any, 0)
 	for walletAddress := range game.WhitePlayers {
@@ -681,6 +752,8 @@ func (m *Manager) getGameStatsUnsafe(game *GameState, gameEnded bool) map[string
 		"board":                 board,
 		"whiteTeamPlayers":      whiteTeamPlayers,
 		"blackTeamPlayers":      blackTeamPlayers,
+		"isInCheck":             isInCheck,
+		"isCheckmate":           isCheckmate,
 	}
 }
 
@@ -760,7 +833,7 @@ func (m *Manager) applyMoveToBoard(game *GameState, move string) {
 		validMoves := game.Game.ValidMoves()
 		for _, validMove := range validMoves {
 			if validMove.S1() == from && validMove.S2() == to {
-				if err := game.Game.Move(validMove); err != nil {
+				if err := game.Game.Move(&validMove, nil); err != nil {
 					log.Printf("Error applying move %s: %v", move, err)
 					return
 				}
@@ -773,7 +846,7 @@ func (m *Manager) applyMoveToBoard(game *GameState, move string) {
 	}
 
 	// Handle algebraic notation (e.g., "e4", "Nf3")
-	if err := game.Game.MoveStr(move); err != nil {
+	if err := game.Game.PushNotationMove(move, chess.AlgebraicNotation{}, nil); err != nil {
 		log.Printf("Error applying algebraic move %s: %v", move, err)
 		return
 	}

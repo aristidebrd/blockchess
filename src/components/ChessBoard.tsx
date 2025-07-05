@@ -135,6 +135,16 @@ const ChessBoard: React.FC<ChessBoardProps> = ({
       (gameState.lastExecutedMove.from === square || gameState.lastExecutedMove.to === square);
     const isValidMove = isPossibleMove && !piece;
 
+    // Check if this square contains a king that is in check or checkmate
+    // The king in check/checkmate is the one of the current turn (the player who needs to respond to the threat)
+    const isKingInCheck = piece && piece.type === 'king' && piece.color === gameState.currentTurn && gameState.isInCheck && !gameState.isCheckmate;
+    const isKingInCheckmate = piece && piece.type === 'king' && piece.color === gameState.currentTurn && gameState.isCheckmate;
+
+    // Debug log for check/checkmate status (only for actual check/checkmate)
+    if (isKingInCheck || isKingInCheckmate) {
+      console.log(`King at ${square} (${piece?.color}) - Check: ${isKingInCheck}, Checkmate: ${isKingInCheckmate}, CurrentTurn: ${gameState.currentTurn}, GameCheck: ${gameState.isInCheck}, GameCheckmate: ${gameState.isCheckmate}`);
+    }
+
     return (
       <div
         key={`${row}-${col}`}
@@ -144,6 +154,7 @@ const ChessBoard: React.FC<ChessBoardProps> = ({
           ${isSelected ? 'ring-4 ring-yellow-400' : ''}
           ${isValidMove ? 'ring-4 ring-green-400' : ''}
           ${isLastMove ? 'ring-4 ring-blue-400' : ''}
+          ${isKingInCheckmate ? 'ring-4 ring-red-400' : isKingInCheck ? 'ring-4 ring-orange-400' : ''}
           ${canDragPiece(piece) ? 'cursor-move' : ''}
         `}
         onClick={() => handleSquareClick(square)}

@@ -225,6 +225,8 @@ const GameView: React.FC<GameViewProps> = ({
                                                 <div className={`w-2 h-2 rounded-full mr-2 ${backendGameState.currentTurn === 'white' ? 'bg-white' : 'bg-gray-400'}`} />
                                                 <div className="text-white font-medium">
                                                     {backendGameState.currentTurn === 'white' ? 'White' : 'Black'} to move
+                                                    {backendGameState.isCheckmate && <span className="ml-2 text-red-400 font-bold">CHECKMATE!</span>}
+                                                    {backendGameState.isInCheck && !backendGameState.isCheckmate && <span className="ml-2 text-orange-400 font-bold">CHECK!</span>}
                                                 </div>
                                             </div>
                                             <div className="text-3xl font-bold text-yellow-400">

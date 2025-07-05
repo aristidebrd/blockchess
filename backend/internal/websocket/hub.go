@@ -99,6 +99,10 @@ type Message struct {
 	// Player statistics per team
 	WhiteTeamPlayers []PlayerStats `json:"whiteTeamPlayers,omitempty"`
 	BlackTeamPlayers []PlayerStats `json:"blackTeamPlayers,omitempty"`
+
+	// Check and checkmate status
+	IsInCheck   bool `json:"isInCheck,omitempty"`
+	IsCheckmate bool `json:"isCheckmate,omitempty"`
 }
 
 type PlayerStats struct {
@@ -1059,6 +1063,12 @@ func (h *Hub) updateStats(stats map[string]any, moveMsg *Message) {
 	}
 	if board, ok := stats["board"].([][]string); ok {
 		moveMsg.Board = board
+	}
+	if isInCheck, ok := stats["isInCheck"].(bool); ok {
+		moveMsg.IsInCheck = isInCheck
+	}
+	if isCheckmate, ok := stats["isCheckmate"].(bool); ok {
+		moveMsg.IsCheckmate = isCheckmate
 	}
 }
 

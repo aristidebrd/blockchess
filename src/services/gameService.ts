@@ -666,6 +666,12 @@ class GameService {
         if (data.board !== undefined) {
             this.currentGameState.boardState = this.convertBackendBoardToFrontend(data.board);
         }
+        if (data.isInCheck !== undefined) {
+            this.currentGameState.isInCheck = data.isInCheck;
+        }
+        if (data.isCheckmate !== undefined) {
+            this.currentGameState.isCheckmate = data.isCheckmate;
+        }
     }
 
     private notifyGameStateUpdate(): void {

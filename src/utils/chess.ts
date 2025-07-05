@@ -78,6 +78,10 @@ export interface GameInfo {
   // Player statistics per team (only for ended games)
   whiteTeamPlayers?: PlayerStats[];
   blackTeamPlayers?: PlayerStats[];
+
+  // Check and checkmate status
+  isInCheck?: boolean;
+  isCheckmate?: boolean;
 }
 
 
