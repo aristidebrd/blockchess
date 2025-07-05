@@ -87,6 +87,12 @@ function App() {
   };
 
   const convertWSGameToLocalFormat = (wsGame: any): GameInfo => {
+    console.log('🔄 Converting WebSocket game data:', wsGame);
+    console.log('🔄 Player statistics in WS data:', {
+      whiteTeamPlayers: wsGame.whiteTeamPlayers,
+      blackTeamPlayers: wsGame.blackTeamPlayers
+    });
+
     return {
       id: wsGame.gameId,
       name: `Game ${wsGame.gameId}`,
@@ -114,6 +120,9 @@ function App() {
       winner: wsGame.winner,
       endReason: wsGame.endReason,
       endedAt: wsGame.endedAt,
+      // Add player statistics for ended games
+      whiteTeamPlayers: wsGame.whiteTeamPlayers || undefined,
+      blackTeamPlayers: wsGame.blackTeamPlayers || undefined,
     };
   };
 

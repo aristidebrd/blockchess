@@ -609,6 +609,34 @@ func (m *Manager) getGameStatsUnsafe(game *GameState, gameEnded bool) map[string
 		currentMove = currentMove - 1
 	}
 
+	// Collect white team player details
+	whiteTeamPlayers := make([]map[string]any, 0)
+	for walletAddress := range game.WhitePlayers {
+		votes := game.PlayerTotalVotes[walletAddress]
+		spent := float64(votes) * 0.01 // Each vote costs 0.01 ETH
+		whiteTeamPlayers = append(whiteTeamPlayers, map[string]any{
+			"walletAddress": walletAddress,
+			"totalVotes":    votes,
+			"totalSpent":    spent,
+		})
+		log.Printf("Collecting white player: %s - %d votes, %.3f ETH", walletAddress, votes, spent)
+	}
+	log.Printf("Total white team players collected: %d", len(whiteTeamPlayers))
+
+	// Collect black team player details
+	blackTeamPlayers := make([]map[string]any, 0)
+	for walletAddress := range game.BlackPlayers {
+		votes := game.PlayerTotalVotes[walletAddress]
+		spent := float64(votes) * 0.01 // Each vote costs 0.01 ETH
+		blackTeamPlayers = append(blackTeamPlayers, map[string]any{
+			"walletAddress": walletAddress,
+			"totalVotes":    votes,
+			"totalSpent":    spent,
+		})
+		log.Printf("Collecting black player: %s - %d votes, %.3f ETH", walletAddress, votes, spent)
+	}
+	log.Printf("Total black team players collected: %d", len(blackTeamPlayers))
+
 	return map[string]any{
 		"whitePlayers":          len(game.WhitePlayers),
 		"blackPlayers":          len(game.BlackPlayers),
@@ -625,6 +653,8 @@ func (m *Manager) getGameStatsUnsafe(game *GameState, gameEnded bool) map[string
 		"playerVotedThisRound":  game.PlayerVotedThisRound,
 		"playerTotalVotes":      game.PlayerTotalVotes,
 		"board":                 board,
+		"whiteTeamPlayers":      whiteTeamPlayers,
+		"blackTeamPlayers":      blackTeamPlayers,
 	}
 }
 

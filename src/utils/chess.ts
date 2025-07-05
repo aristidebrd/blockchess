@@ -72,11 +72,21 @@ export interface GameInfo {
   winner?: 'white' | 'black' | 'draw';
   endReason?: string;
   endedAt?: number; // Unix timestamp
+
+  // Player statistics per team (only for ended games)
+  whiteTeamPlayers?: PlayerStats[];
+  blackTeamPlayers?: PlayerStats[];
 }
 
 
 
 
+
+export interface PlayerStats {
+  walletAddress: string;
+  totalVotes: number;
+  totalSpent: number;
+}
 
 export interface GameEndInfo {
   gameId: string;
@@ -91,6 +101,8 @@ export interface GameEndInfo {
   blackPot: number;
   currentMove: number;
   playerVotes: number;
+  whiteTeamPlayers?: PlayerStats[];
+  blackTeamPlayers?: PlayerStats[];
 }
 
 // ========== CONSTANTS ==========

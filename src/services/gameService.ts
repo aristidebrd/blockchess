@@ -287,6 +287,14 @@ class GameService {
         const unsubGameEnd = wsService.on('game_end', (data) => {
             if (data.gameId === this.currentGameId) {
                 console.log('🏁 Game ended:', data);
+                console.log('🏁 Player statistics received:', {
+                    whiteTeamPlayers: data.whiteTeamPlayers,
+                    blackTeamPlayers: data.blackTeamPlayers
+                });
+                console.log('🏁 Player statistics received:', {
+                    whiteTeamPlayers: data.whiteTeamPlayers,
+                    blackTeamPlayers: data.blackTeamPlayers
+                });
 
                 // Create game end info
                 const gameEndInfo: GameEndInfo = {
@@ -301,7 +309,9 @@ class GameService {
                     whitePot: data.whitePot || 0,
                     blackPot: data.blackPot || 0,
                     currentMove: data.currentMove || 0,
-                    playerVotes: data.playerVotes || 0
+                    playerVotes: data.playerVotes || 0,
+                    whiteTeamPlayers: data.whiteTeamPlayers || [],
+                    blackTeamPlayers: data.blackTeamPlayers || []
                 };
 
                 console.log('🏁 Triggering game end callbacks:', this.gameEndCallbacks.size);

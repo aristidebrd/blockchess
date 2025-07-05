@@ -48,6 +48,10 @@ type GameInfo struct {
 	Winner       string  `json:"winner,omitempty"`    // "white", "black", "draw" (only for ended games)
 	EndReason    string  `json:"endReason,omitempty"` // "checkmate", "stalemate", etc. (only for ended games)
 	EndedAt      *int64  `json:"endedAt,omitempty"`   // Unix timestamp when game ended
+
+	// Player statistics per team (only for ended games)
+	WhiteTeamPlayers []PlayerStats `json:"whiteTeamPlayers,omitempty"`
+	BlackTeamPlayers []PlayerStats `json:"blackTeamPlayers,omitempty"`
 }
 
 type Message struct {
@@ -87,8 +91,17 @@ type Message struct {
 	Winner        string `json:"winner,omitempty"`        // "white", "black", "draw"
 	GameEndReason string `json:"gameEndReason,omitempty"` // "checkmate", "stalemate", "draw"
 	PlayerVotes   int    `json:"playerVotes,omitempty"`   // Current player's total votes
+
+	// Player statistics per team
+	WhiteTeamPlayers []PlayerStats `json:"whiteTeamPlayers,omitempty"`
+	BlackTeamPlayers []PlayerStats `json:"blackTeamPlayers,omitempty"`
 }
 
+type PlayerStats struct {
+	WalletAddress string  `json:"walletAddress"`
+	TotalVotes    int     `json:"totalVotes"`
+	TotalSpent    float64 `json:"totalSpent"`
+}
 type Hub struct {
 	// Registered clients
 	clients map[*Client]bool
@@ -715,6 +728,39 @@ func (h *Hub) handleGameEnd(gameID, winner, reason string, gameStats map[string]
 	// Add all game statistics to the message
 	h.updateStats(gameStats, gameEndMsg)
 
+	// Extract and add team player statistics
+	if whiteTeamPlayers, ok := gameStats["whiteTeamPlayers"].([]map[string]any); ok {
+		log.Printf("White team players found: %d players", len(whiteTeamPlayers))
+		gameEndMsg.WhiteTeamPlayers = make([]PlayerStats, len(whiteTeamPlayers))
+		for i, player := range whiteTeamPlayers {
+			gameEndMsg.WhiteTeamPlayers[i] = PlayerStats{
+				WalletAddress: player["walletAddress"].(string),
+				TotalVotes:    player["totalVotes"].(int),
+				TotalSpent:    player["totalSpent"].(float64),
+			}
+			log.Printf("White player %d: %s - %d votes, %.3f ETH", i+1,
+				player["walletAddress"].(string), player["totalVotes"].(int), player["totalSpent"].(float64))
+		}
+	} else {
+		log.Printf("No white team players found in game stats")
+	}
+
+	if blackTeamPlayers, ok := gameStats["blackTeamPlayers"].([]map[string]any); ok {
+		log.Printf("Black team players found: %d players", len(blackTeamPlayers))
+		gameEndMsg.BlackTeamPlayers = make([]PlayerStats, len(blackTeamPlayers))
+		for i, player := range blackTeamPlayers {
+			gameEndMsg.BlackTeamPlayers[i] = PlayerStats{
+				WalletAddress: player["walletAddress"].(string),
+				TotalVotes:    player["totalVotes"].(int),
+				TotalSpent:    player["totalSpent"].(float64),
+			}
+			log.Printf("Black player %d: %s - %d votes, %.3f ETH", i+1,
+				player["walletAddress"].(string), player["totalVotes"].(int), player["totalSpent"].(float64))
+		}
+	} else {
+		log.Printf("No black team players found in game stats")
+	}
+
 	// Broadcast to all clients in the game with their individual vote counts
 	if room, exists := h.gameRooms[gameID]; exists {
 		for client := range room {
@@ -768,6 +814,29 @@ func (h *Hub) handleGameEnd(gameID, winner, reason string, gameStats map[string]
 	}
 	if blackPot, ok := gameStats["blackPot"].(float64); ok {
 		endedGameInfo.BlackPot = blackPot
+	}
+
+	// Extract team player statistics
+	if whiteTeamPlayers, ok := gameStats["whiteTeamPlayers"].([]map[string]any); ok {
+		endedGameInfo.WhiteTeamPlayers = make([]PlayerStats, len(whiteTeamPlayers))
+		for i, player := range whiteTeamPlayers {
+			endedGameInfo.WhiteTeamPlayers[i] = PlayerStats{
+				WalletAddress: player["walletAddress"].(string),
+				TotalVotes:    player["totalVotes"].(int),
+				TotalSpent:    player["totalSpent"].(float64),
+			}
+		}
+	}
+
+	if blackTeamPlayers, ok := gameStats["blackTeamPlayers"].([]map[string]any); ok {
+		endedGameInfo.BlackTeamPlayers = make([]PlayerStats, len(blackTeamPlayers))
+		for i, player := range blackTeamPlayers {
+			endedGameInfo.BlackTeamPlayers[i] = PlayerStats{
+				WalletAddress: player["walletAddress"].(string),
+				TotalVotes:    player["totalVotes"].(int),
+				TotalSpent:    player["totalSpent"].(float64),
+			}
+		}
 	}
 
 	// Store the ended game

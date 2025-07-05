@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Play, Users, Clock, Crown, Eye, AlertTriangle, Swords, Trophy, Timer, Copy, ExternalLink, Filter } from 'lucide-react';
+import { Play, Users, Clock, Crown, Eye, AlertTriangle, Swords, Trophy, Timer, Copy, ExternalLink, Filter, Vote, Coins } from 'lucide-react';
 import { useAccount } from 'wagmi';
 import { GameInfo, ChessPiece } from '../utils/chess';
 import { wsService } from '../services/websocket';
+import PlayerStatistics from './PlayerStatistics';
 
 interface GameLobbyProps {
   onJoinGame: (gameId: string, side?: 'white' | 'black' | 'spectator') => void;
@@ -85,6 +86,7 @@ const BoardPreview: React.FC<{ boardState?: (ChessPiece | null)[][], onClick?: (
 const GameLobby: React.FC<GameLobbyProps> = ({ onJoinGame, onStartMatchmaking, onCancelMatchmaking, gamePlayersCount, matchmakingStartTime, isMatchmaking, games, onFilterChange }) => {
   const { isConnected, address } = useAccount();
   const [selectedGameInfo, setSelectedGameInfo] = useState<GameInfo | null>(null);
+  const [selectedStatsGame, setSelectedStatsGame] = useState<GameInfo | null>(null);
   const [matchmakingTime, setMatchmakingTime] = useState(0);
   const [copiedGameId, setCopiedGameId] = useState<string | null>(null);
   const [currentFilter, setCurrentFilter] = useState<'active' | 'ended' | 'all'>('all');
@@ -271,6 +273,14 @@ const GameLobby: React.FC<GameLobbyProps> = ({ onJoinGame, onStartMatchmaking, o
 
   const closeBoardModal = () => {
     setSelectedGameInfo(null);
+  };
+
+  const openStatsModal = (game: GameInfo) => {
+    setSelectedStatsGame(game);
+  };
+
+  const closeStatsModal = () => {
+    setSelectedStatsGame(null);
   };
 
   // Helper function to copy game URL to clipboard
@@ -568,21 +578,25 @@ const GameLobby: React.FC<GameLobbyProps> = ({ onJoinGame, onStartMatchmaking, o
                   </div>
                 </div>
 
-                {/* Game Stats */}
-                <div className="grid grid-cols-3 gap-3 mb-6">
-                  <div className="bg-gradient-to-br from-green-900/30 to-green-800/30 rounded-lg p-3 text-center border border-green-500/20">
-                    <div className="text-green-400 font-bold text-lg">{game.totalPot.toFixed(2)}</div>
-                    <div className="text-green-300 text-xs">Total Pot (ETH)</div>
+                {/* Game Stats - Different for active vs ended games */}
+                {game.status === 'active' ? (
+                  <div className="grid grid-cols-3 gap-3 mb-6">
+                    <div className="bg-gradient-to-br from-green-900/30 to-green-800/30 rounded-lg p-3 text-center border border-green-500/20">
+                      <div className="text-green-400 font-bold text-lg">{game.totalPot.toFixed(2)}</div>
+                      <div className="text-green-300 text-xs">Total Pot (ETH)</div>
+                    </div>
+                    <div className="bg-gradient-to-br from-blue-900/30 to-blue-800/30 rounded-lg p-3 text-center border border-blue-500/20">
+                      <div className="text-blue-400 font-bold text-lg">{game.spectators}</div>
+                      <div className="text-blue-300 text-xs">Spectators</div>
+                    </div>
+                    <div className="bg-gradient-to-br from-purple-900/30 to-purple-800/30 rounded-lg p-3 text-center border border-purple-500/20">
+                      <div className="text-purple-400 font-bold text-lg capitalize">{game.currentTurn}</div>
+                      <div className="text-purple-300 text-xs">Turn</div>
+                    </div>
                   </div>
-                  <div className="bg-gradient-to-br from-blue-900/30 to-blue-800/30 rounded-lg p-3 text-center border border-blue-500/20">
-                    <div className="text-blue-400 font-bold text-lg">{game.spectators}</div>
-                    <div className="text-blue-300 text-xs">Spectators</div>
-                  </div>
-                  <div className="bg-gradient-to-br from-purple-900/30 to-purple-800/30 rounded-lg p-3 text-center border border-purple-500/20">
-                    <div className="text-purple-400 font-bold text-lg capitalize">{game.currentTurn}</div>
-                    <div className="text-purple-300 text-xs">Turn</div>
-                  </div>
-                </div>
+                ) : (
+                  <div></div>
+                )}
 
                 {/* Action Buttons */}
                 <div className="space-y-3">
@@ -676,11 +690,11 @@ const GameLobby: React.FC<GameLobbyProps> = ({ onJoinGame, onStartMatchmaking, o
 
                   {(game.status === 'completed' || game.status === 'ended') && (
                     <button
-                      onClick={() => handleWatchGame(game.id)}
+                      onClick={() => openStatsModal(game)}
                       className="w-full bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-500 hover:to-purple-600 text-white font-medium py-3 px-4 rounded-lg transition-all duration-200 flex items-center justify-center space-x-2 shadow-lg hover:shadow-xl transform hover:scale-105"
                     >
                       <Trophy className="w-4 h-4" />
-                      <span>{game.status === 'ended' ? 'View Game Result' : 'View Completed Game'}</span>
+                      <span>View Game Statistics</span>
                     </button>
                   )}
                 </div>
@@ -782,6 +796,18 @@ const GameLobby: React.FC<GameLobbyProps> = ({ onJoinGame, onStartMatchmaking, o
               </div>
             </div>
 
+            {/* Player Statistics for Ended Games */}
+            {(selectedGameInfo.status === 'ended' || selectedGameInfo.status === 'completed') &&
+              (selectedGameInfo.whiteTeamPlayers || selectedGameInfo.blackTeamPlayers) && (
+                <div className="mb-8">
+                  <PlayerStatistics
+                    whiteTeamPlayers={selectedGameInfo.whiteTeamPlayers}
+                    blackTeamPlayers={selectedGameInfo.blackTeamPlayers}
+                    darkTheme={true}
+                  />
+                </div>
+              )}
+
             {/* Game Actions */}
             <div className="flex justify-center space-x-4">
               {(() => {
@@ -824,6 +850,194 @@ const GameLobby: React.FC<GameLobbyProps> = ({ onJoinGame, onStartMatchmaking, o
                   </>
                 );
               })()}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Statistics Modal for Ended Games */}
+      {selectedStatsGame && (
+        <div
+          className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+          onClick={closeStatsModal}
+        >
+          <div
+            className="bg-gradient-to-br from-gray-800 via-gray-900 to-black rounded-2xl p-8 max-w-4xl w-full max-h-screen overflow-auto border border-gray-700 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div className="flex items-center justify-between mb-8">
+              <div>
+                <h2 className="text-3xl font-bold text-white mb-3">Game Statistics</h2>
+                <div className="flex items-center space-x-6 text-sm">
+                  <div className="flex items-center space-x-2 text-gray-300">
+                    <Swords className="w-4 h-4" />
+                    <span>Final Move: {selectedStatsGame.currentMove}</span>
+                  </div>
+                  <div className="flex items-center space-x-2 text-green-400">
+                    <Trophy className="w-4 h-4" />
+                    <span>{selectedStatsGame.totalPot.toFixed(2)} ETH Total Pot</span>
+                  </div>
+                  {selectedStatsGame.winner && (
+                    <div className="flex items-center space-x-2 text-purple-400">
+                      <Crown className="w-4 h-4" />
+                      <span className="capitalize">
+                        {selectedStatsGame.winner === 'draw' ? 'Draw' : `${selectedStatsGame.winner} Team Won`}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </div>
+              <button
+                onClick={closeStatsModal}
+                className="text-gray-400 hover:text-white text-3xl font-bold p-2 hover:bg-gray-700 rounded-lg transition-colors"
+              >
+                ×
+              </button>
+            </div>
+
+            {/* Team Statistics and Player Lists */}
+            {(selectedStatsGame.whiteTeamPlayers || selectedStatsGame.blackTeamPlayers) && (
+              <div className="mb-8">
+                <h3 className="font-bold text-white text-center text-lg mb-6">Team Statistics</h3>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {/* White Team */}
+                  {selectedStatsGame.whiteTeamPlayers && selectedStatsGame.whiteTeamPlayers.length > 0 && (
+                    <div className="bg-gradient-to-r from-gray-700/30 to-gray-600/30 p-6 rounded-lg border border-gray-600/50">
+                      <h4 className="font-bold text-white mb-4 flex items-center gap-2 text-lg">
+                        <div className="w-5 h-5 bg-white rounded-full"></div>
+                        White Team
+                      </h4>
+
+                      {/* Team Summary */}
+                      <div className="space-y-2 mb-6 text-sm">
+                        <div className="flex justify-between">
+                          <span className="text-gray-300">Total Players:</span>
+                          <span className="text-white font-medium">{selectedStatsGame.whitePlayers}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-300">Total Contributed:</span>
+                          <span className="text-green-400 font-medium">{selectedStatsGame.whitePot.toFixed(3)} ETH</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-300">Total Votes:</span>
+                          <span className="text-blue-400 font-medium">
+                            {selectedStatsGame.whiteTeamPlayers.reduce((sum, player) => sum + player.totalVotes, 0)}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Players List */}
+                      <div>
+                        <h5 className="font-semibold text-white mb-3">Players:</h5>
+                        <div className="space-y-2">
+                          {[...selectedStatsGame.whiteTeamPlayers].sort((a, b) => b.totalVotes - a.totalVotes).map((player, index) => (
+                            <div key={player.walletAddress} className="flex justify-between items-center text-sm bg-gray-800/50 p-3 rounded border border-gray-700/50">
+                              <div className="flex items-center gap-2">
+                                <span className="text-white font-semibold bg-gray-600 px-2 py-1 rounded text-xs">#{index + 1}</span>
+                                <span className="font-mono text-gray-300">
+                                  {player.walletAddress.length <= 10 ? player.walletAddress : `${player.walletAddress.slice(0, 4)}...${player.walletAddress.slice(-4)}`}
+                                </span>
+                              </div>
+                              <div className="text-right">
+                                <span className="text-white font-medium">
+                                  {player.totalVotes} votes {player.totalSpent.toFixed(3)} ETH
+                                </span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Black Team */}
+                  {selectedStatsGame.blackTeamPlayers && selectedStatsGame.blackTeamPlayers.length > 0 && (
+                    <div className="bg-gradient-to-r from-gray-800/30 to-gray-900/30 p-6 rounded-lg border border-gray-700/50">
+                      <h4 className="font-bold text-gray-300 mb-4 flex items-center gap-2 text-lg">
+                        <div className="w-5 h-5 bg-gray-600 rounded-full"></div>
+                        Black Team
+                      </h4>
+
+                      {/* Team Summary */}
+                      <div className="space-y-2 mb-6 text-sm">
+                        <div className="flex justify-between">
+                          <span className="text-gray-300">Total Players:</span>
+                          <span className="text-gray-300 font-medium">{selectedStatsGame.blackPlayers}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-300">Total Contributed:</span>
+                          <span className="text-green-400 font-medium">{selectedStatsGame.blackPot.toFixed(3)} ETH</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-300">Total Votes:</span>
+                          <span className="text-blue-400 font-medium">
+                            {selectedStatsGame.blackTeamPlayers.reduce((sum, player) => sum + player.totalVotes, 0)}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Players List */}
+                      <div>
+                        <h5 className="font-semibold text-gray-300 mb-3">Players:</h5>
+                        <div className="space-y-2">
+                          {[...selectedStatsGame.blackTeamPlayers].sort((a, b) => b.totalVotes - a.totalVotes).map((player, index) => (
+                            <div key={player.walletAddress} className="flex justify-between items-center text-sm bg-gray-800/50 p-3 rounded border border-gray-700/50">
+                              <div className="flex items-center gap-2">
+                                <span className="text-gray-300 font-semibold bg-gray-700 px-2 py-1 rounded text-xs">#{index + 1}</span>
+                                <span className="font-mono text-gray-300">
+                                  {player.walletAddress.length <= 10 ? player.walletAddress : `${player.walletAddress.slice(0, 4)}...${player.walletAddress.slice(-4)}`}
+                                </span>
+                              </div>
+                              <div className="text-right">
+                                <span className="text-gray-300 font-medium">
+                                  {player.totalVotes} votes {player.totalSpent.toFixed(3)} ETH
+                                </span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Debug section when no player data */}
+            {!(selectedStatsGame.whiteTeamPlayers || selectedStatsGame.blackTeamPlayers) && (
+              <div className="mb-8 bg-red-900/20 border border-red-500/50 rounded-lg p-4">
+                <h3 className="font-bold text-red-400 text-center text-lg mb-2">No Player Statistics Available</h3>
+                <p className="text-red-300 text-center text-sm">
+                  Player statistics are not available for this game. This might be because:
+                </p>
+                <ul className="text-red-300 text-xs mt-2 space-y-1">
+                  <li>• The game ended before the new statistics system was implemented</li>
+                  <li>• The game data is incomplete</li>
+                  <li>• There's an issue with data transmission from the backend</li>
+                </ul>
+              </div>
+            )}
+
+            {/* Action Buttons */}
+            <div className="flex justify-center space-x-4">
+              <button
+                onClick={() => {
+                  closeStatsModal();
+                  handleWatchGame(selectedStatsGame.id);
+                }}
+                className="bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-500 hover:to-blue-600 text-white font-medium py-3 px-6 rounded-xl transition-all duration-200 flex items-center space-x-2 shadow-lg hover:shadow-xl transform hover:scale-105"
+              >
+                <Eye className="w-4 h-4" />
+                <span>View Game Board</span>
+              </button>
+              <button
+                onClick={closeStatsModal}
+                className="bg-gradient-to-r from-gray-600 to-gray-700 hover:from-gray-500 hover:to-gray-600 text-white font-medium py-3 px-6 rounded-xl transition-all duration-200 shadow-lg hover:shadow-xl transform hover:scale-105"
+              >
+                Close
+              </button>
             </div>
           </div>
         </div>
