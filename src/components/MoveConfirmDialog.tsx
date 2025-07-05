@@ -79,7 +79,7 @@ const MoveConfirmDialog: React.FC<MoveConfirmDialogProps> = ({
                 <div className="bg-gradient-to-r from-yellow-900/30 to-orange-900/30 rounded-xl p-4 mb-6 border border-yellow-500/20">
                     <div className="flex items-center justify-between">
                         <span className="text-gray-300">Vote Cost:</span>
-                        <span className="text-yellow-400 font-bold text-lg">0.01 ETH</span>
+                        <span className="text-yellow-400 font-bold text-lg">0.01 USDC</span>
                     </div>
                     <p className="text-xs text-gray-400 mt-2">
                         This will place a bet on your proposed move. If it wins, you'll share the pot!

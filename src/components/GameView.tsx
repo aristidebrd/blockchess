@@ -250,24 +250,24 @@ const GameView: React.FC<GameViewProps> = ({
                                 <div className="bg-gradient-to-r from-blue-900/50 to-purple-900/50 rounded-xl p-6 border border-blue-500/30">
                                     <div className="flex justify-between items-center text-sm mb-2">
                                         <span className="text-gray-300">Fixed bet per vote:</span>
-                                        <span className="text-blue-400 font-bold">0.01 ETH</span>
+                                        <span className="text-blue-400 font-bold">0.01 USDC</span>
                                     </div>
                                     {backendGameState && (
                                         <>
                                             <div className="flex justify-between items-center text-sm mb-2">
                                                 <span className="text-gray-300">White pot:</span>
-                                                <span className="text-white font-bold">{backendGameState.whitePot.toFixed(2)} ETH</span>
+                                                <span className="text-white font-bold">{backendGameState.whitePot.toFixed(2)} USDC</span>
                                             </div>
                                             <div className="flex justify-between items-center text-sm mb-2">
                                                 <span className="text-gray-300">Black pot:</span>
-                                                <span className="text-gray-300 font-bold">{backendGameState.blackPot.toFixed(2)} ETH</span>
+                                                <span className="text-gray-300 font-bold">{backendGameState.blackPot.toFixed(2)} USDC</span>
                                             </div>
                                         </>
                                     )}
                                     <div className="flex justify-between items-center text-sm">
                                         <span className="text-gray-300">Total pot:</span>
                                         <span className="text-green-400 font-bold">
-                                            {backendGameState ? backendGameState.totalPot.toFixed(2) : '0.00'} ETH
+                                            {backendGameState ? backendGameState.totalPot.toFixed(2) : '0.00'} USDC
                                         </span>
                                     </div>
                                 </div>

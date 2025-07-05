@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { Play, Users, Clock, Crown, Eye, AlertTriangle, Swords, Trophy, Timer, Copy, ExternalLink, Filter, Vote, Coins } from 'lucide-react';
 import { useAccount } from 'wagmi';
-import { GameInfo, ChessPiece, initialBoard } from '../utils/chess';
+import { GameInfo, ChessPiece } from '../utils/chess';
 import { wsService } from '../services/websocket';
+import PlayerStatistics from './PlayerStatistics';
 
 interface GameLobbyProps {
   onJoinGame: (gameId: string, side?: 'white' | 'black' | 'spectator') => void;
@@ -18,8 +19,29 @@ interface GameLobbyProps {
 
 // Compact board preview component
 const BoardPreview: React.FC<{ boardState?: (ChessPiece | null)[][], onClick?: () => void, isLarge?: boolean }> = ({ boardState, onClick, isLarge = false }) => {
-  // Use provided board state or fall back to initial board
-  const displayBoard = boardState || initialBoard;
+  if (!boardState) {
+    // Show initial board setup if no board state available
+    return (
+      <div
+        className={`grid grid-cols-8 gap-px bg-amber-900 p-1 rounded-lg border-2 border-amber-700 ${onClick ? 'cursor-pointer hover:border-amber-500 transition-colors' : ''} ${isLarge ? 'w-96 h-96' : 'w-32 h-32'}`}
+        onClick={onClick}
+      >
+        {Array.from({ length: 64 }).map((_, index) => {
+          const row = Math.floor(index / 8);
+          const col = index % 8;
+          const isLight = (row + col) % 2 === 0;
+
+          return (
+            <div
+              key={index}
+              className={`aspect-square ${isLight ? 'bg-amber-100' : 'bg-amber-800'} 
+                         rounded-sm flex items-center justify-center ${isLarge ? 'text-4xl' : 'text-xs'}`}
+            />
+          );
+        })}
+      </div>
+    );
+  }
 
   const getPieceSymbol = (piece: ChessPiece) => {
     const symbols = {
@@ -38,7 +60,7 @@ const BoardPreview: React.FC<{ boardState?: (ChessPiece | null)[][], onClick?: (
       className={`grid grid-cols-8 gap-px bg-amber-900 p-1 rounded-lg border-2 border-amber-700 ${onClick ? 'cursor-pointer hover:border-amber-500 transition-colors' : ''} ${isLarge ? 'w-96 h-96' : 'w-32 h-32'}`}
       onClick={onClick}
     >
-      {displayBoard.flat().map((piece, index) => {
+      {boardState.flat().map((piece, index) => {
         const row = Math.floor(index / 8);
         const col = index % 8;
         const isLight = (row + col) % 2 === 0;
@@ -98,6 +120,14 @@ const GameLobby: React.FC<GameLobbyProps> = ({ onJoinGame, onStartMatchmaking, o
     if (onFilterChange) {
       onFilterChange(filter);
     }
+  };
+
+  const canJoinAsPlayer = (game: GameInfo, playerAddress?: string): boolean => {
+    if (game.status !== 'waiting' && game.gameStartTime) {
+      const gameAge = Date.now() - game.gameStartTime.getTime();
+      return gameAge <= 7 * 60 * 1000; // 7 minutes in milliseconds
+    }
+    return game.status === 'waiting';
   };
 
   const [playerStatusCache, setPlayerStatusCache] = useState<Record<string, { team: string; gameId: string }>>({});
@@ -449,6 +479,7 @@ const GameLobby: React.FC<GameLobbyProps> = ({ onJoinGame, onStartMatchmaking, o
       {/* Games Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
         {games.map((game) => {
+          const canJoin = canJoinAsPlayer(game, address);
           const gameAge = getGameAgeMinutes(game);
           const isTooOld = gameAge > 7 && game.status === 'active';
 
@@ -524,7 +555,7 @@ const GameLobby: React.FC<GameLobbyProps> = ({ onJoinGame, onStartMatchmaking, o
                         </div>
                       </div>
                       <div className="mt-2 text-xs text-gray-400">
-                        {game.whitePot.toFixed(2)} ETH contributed
+                        {game.whitePot.toFixed(2)} USDC contributed
                       </div>
                     </div>
 
@@ -541,7 +572,7 @@ const GameLobby: React.FC<GameLobbyProps> = ({ onJoinGame, onStartMatchmaking, o
                         </div>
                       </div>
                       <div className="mt-2 text-xs text-gray-400">
-                        {game.blackPot.toFixed(2)} ETH contributed
+                        {game.blackPot.toFixed(2)} USDC contributed
                       </div>
                     </div>
                   </div>
@@ -552,7 +583,7 @@ const GameLobby: React.FC<GameLobbyProps> = ({ onJoinGame, onStartMatchmaking, o
                   <div className="grid grid-cols-3 gap-3 mb-6">
                     <div className="bg-gradient-to-br from-green-900/30 to-green-800/30 rounded-lg p-3 text-center border border-green-500/20">
                       <div className="text-green-400 font-bold text-lg">{game.totalPot.toFixed(2)}</div>
-                      <div className="text-green-300 text-xs">Total Pot (ETH)</div>
+                      <div className="text-green-300 text-xs">Total Pot (USDC)</div>
                     </div>
                     <div className="bg-gradient-to-br from-blue-900/30 to-blue-800/30 rounded-lg p-3 text-center border border-blue-500/20">
                       <div className="text-blue-400 font-bold text-lg">{game.spectators}</div>
@@ -708,7 +739,7 @@ const GameLobby: React.FC<GameLobbyProps> = ({ onJoinGame, onStartMatchmaking, o
                   </div>
                   <div className="flex items-center space-x-2 text-green-400">
                     <Trophy className="w-4 h-4" />
-                    <span>{selectedGameInfo.totalPot.toFixed(2)} ETH pot</span>
+                    <span>{selectedGameInfo.totalPot.toFixed(2)} USDC pot</span>
                   </div>
                 </div>
               </div>
@@ -742,7 +773,7 @@ const GameLobby: React.FC<GameLobbyProps> = ({ onJoinGame, onStartMatchmaking, o
                   </div>
                   <div className="flex justify-between">
                     <span className="text-gray-300">Contributed:</span>
-                    <span className="text-green-400 font-medium">{selectedGameInfo.whitePot.toFixed(2)} ETH</span>
+                    <span className="text-green-400 font-medium">{selectedGameInfo.whitePot.toFixed(2)} USDC</span>
                   </div>
                 </div>
               </div>
@@ -759,11 +790,23 @@ const GameLobby: React.FC<GameLobbyProps> = ({ onJoinGame, onStartMatchmaking, o
                   </div>
                   <div className="flex justify-between">
                     <span className="text-gray-300">Contributed:</span>
-                    <span className="text-green-400 font-medium">{selectedGameInfo.blackPot.toFixed(2)} ETH</span>
+                    <span className="text-green-400 font-medium">{selectedGameInfo.blackPot.toFixed(2)} USDC</span>
                   </div>
                 </div>
               </div>
             </div>
+
+            {/* Player Statistics for Ended Games */}
+            {(selectedGameInfo.status === 'ended' || selectedGameInfo.status === 'completed') &&
+              (selectedGameInfo.whiteTeamPlayers || selectedGameInfo.blackTeamPlayers) && (
+                <div className="mb-8">
+                  <PlayerStatistics
+                    whiteTeamPlayers={selectedGameInfo.whiteTeamPlayers}
+                    blackTeamPlayers={selectedGameInfo.blackTeamPlayers}
+                    darkTheme={true}
+                  />
+                </div>
+              )}
 
             {/* Game Actions */}
             <div className="flex justify-center space-x-4">
@@ -833,7 +876,7 @@ const GameLobby: React.FC<GameLobbyProps> = ({ onJoinGame, onStartMatchmaking, o
                   </div>
                   <div className="flex items-center space-x-2 text-green-400">
                     <Trophy className="w-4 h-4" />
-                    <span>{selectedStatsGame.totalPot.toFixed(2)} ETH Total Pot</span>
+                    <span>{selectedStatsGame.totalPot.toFixed(2)} USDC Total Pot</span>
                   </div>
                   {selectedStatsGame.winner && (
                     <div className="flex items-center space-x-2 text-purple-400">
@@ -875,7 +918,7 @@ const GameLobby: React.FC<GameLobbyProps> = ({ onJoinGame, onStartMatchmaking, o
                         </div>
                         <div className="flex justify-between">
                           <span className="text-gray-300">Total Contributed:</span>
-                          <span className="text-green-400 font-medium">{selectedStatsGame.whitePot.toFixed(3)} ETH</span>
+                          <span className="text-green-400 font-medium">{selectedStatsGame.whitePot.toFixed(3)} USDC</span>
                         </div>
                         <div className="flex justify-between">
                           <span className="text-gray-300">Total Votes:</span>
@@ -899,7 +942,7 @@ const GameLobby: React.FC<GameLobbyProps> = ({ onJoinGame, onStartMatchmaking, o
                               </div>
                               <div className="text-right">
                                 <span className="text-white font-medium">
-                                  {player.totalVotes} votes {player.totalSpent.toFixed(3)} ETH
+                                  {player.totalVotes} votes {player.totalSpent.toFixed(3)} USDC
                                 </span>
                               </div>
                             </div>
@@ -925,7 +968,7 @@ const GameLobby: React.FC<GameLobbyProps> = ({ onJoinGame, onStartMatchmaking, o
                         </div>
                         <div className="flex justify-between">
                           <span className="text-gray-300">Total Contributed:</span>
-                          <span className="text-green-400 font-medium">{selectedStatsGame.blackPot.toFixed(3)} ETH</span>
+                          <span className="text-green-400 font-medium">{selectedStatsGame.blackPot.toFixed(3)} USDC</span>
                         </div>
                         <div className="flex justify-between">
                           <span className="text-gray-300">Total Votes:</span>
@@ -949,7 +992,7 @@ const GameLobby: React.FC<GameLobbyProps> = ({ onJoinGame, onStartMatchmaking, o
                               </div>
                               <div className="text-right">
                                 <span className="text-gray-300 font-medium">
-                                  {player.totalVotes} votes {player.totalSpent.toFixed(3)} ETH
+                                  {player.totalVotes} votes {player.totalSpent.toFixed(3)} USDC
                                 </span>
                               </div>
                             </div>

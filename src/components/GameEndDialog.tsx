@@ -164,7 +164,7 @@ const GameEndDialog: React.FC<GameEndDialogProps> = ({ gameEndInfo, returnToLobb
                                                     </div>
                                                     <div className="text-right">
                                                         <div className="text-amber-700 font-semibold">{player.totalVotes} votes</div>
-                                                        <div className="text-amber-600 text-xs">${player.totalSpent.toFixed(3)} ETH</div>
+                                                        <div className="text-amber-600 text-xs">${player.totalSpent.toFixed(3)} USDC</div>
                                                     </div>
                                                 </div>
                                             ))}
@@ -188,7 +188,7 @@ const GameEndDialog: React.FC<GameEndDialogProps> = ({ gameEndInfo, returnToLobb
                                                     </div>
                                                     <div className="text-right">
                                                         <div className="text-gray-700 font-semibold">{player.totalVotes} votes</div>
-                                                        <div className="text-gray-600 text-xs">${player.totalSpent.toFixed(3)} ETH</div>
+                                                        <div className="text-gray-600 text-xs">${player.totalSpent.toFixed(3)} USDC</div>
                                                     </div>
                                                 </div>
                                             ))}
