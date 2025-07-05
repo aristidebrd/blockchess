@@ -674,6 +674,7 @@ const GameLobby: React.FC<GameLobbyProps> = ({ onJoinGame, onStartMatchmaking, o
         if (playerStatus.team === side) {
           // Player is reconnecting to their existing team
           console.log(`🔘 Player ${address} reconnecting to ${playerStatus.team} team in game ${gameId}`);
+
           onJoinGame(gameId, side);
         } else {
           // Player is trying to join a different team
@@ -703,6 +704,9 @@ const GameLobby: React.FC<GameLobbyProps> = ({ onJoinGame, onStartMatchmaking, o
       alert('Please connect your wallet to join a team');
       return;
     }
+
+    // Show approval flow first
+    setShowApprovalFlow(true);
 
     try {
       // Check if player is already in the game
