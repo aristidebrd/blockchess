@@ -27,7 +27,7 @@ import (
 // BlockchainService interface defines blockchain operations
 type BlockchainService interface {
 	CreateGame(stakeAmount *big.Int) (*GameCreationResult, error)
-	RecordMove(gameID string, player common.Address, chainID uint32, team uint8) error
+	RecordMove(gameID string, player common.Address, team uint8) error
 	EndGame(gameID string, result GameResult) error
 	IsConnected() bool
 	GetGameInfo(gameID string) (*GameInfo, error)
@@ -421,7 +421,7 @@ func DecodeGameFactoryTransactionByHash(client *ethclient.Client, gameFactoryAdd
 }
 
 // RecordMove records a move on the blockchain
-func (s *EthereumBlockchainService) RecordMove(gameID string, player common.Address, chainID uint32, team uint8) error {
+func (s *EthereumBlockchainService) RecordMove(gameID string, player common.Address, team uint8) error {
 	// Get fresh nonce
 	nonce, err := s.client.PendingNonceAt(context.Background(), s.auth.From)
 	if err != nil {
@@ -429,8 +429,18 @@ func (s *EthereumBlockchainService) RecordMove(gameID string, player common.Addr
 	}
 	s.auth.Nonce = big.NewInt(int64(nonce))
 
+	ethclient, ok := s.client.(*ethclient.Client)
+	if !ok {
+		return fmt.Errorf("client is not an ethclient.Client")
+	}
+	chainID, err := ethclient.ChainID(context.Background())
+	if err != nil {
+		return fmt.Errorf("failed to get chain ID: %v", err)
+	}
+	chainIDUint32 := uint32(chainID.Uint64())
+
 	// Record move on contract
-	tx, err := s.gameContract.AddVote(s.auth, player, chainID, team)
+	tx, err := s.gameContract.AddVote(s.auth, player, chainIDUint32, team)
 	if err != nil {
 		return fmt.Errorf("failed to record move on-chain: %v", err)
 	}
@@ -639,7 +649,7 @@ func (s *EthereumBlockchainService) RequestPlayerApproval(playerAddress common.A
 }
 
 // Generate Permit2 signature data for allowance-based permits
-func (s *EthereumBlockchainService) GeneratePermit2SignatureData(playerAddress common.Address, chainId uint32) (*apitypes.TypedData, error) {
+func (s *EthereumBlockchainService) GeneratePermit2SignatureData(playerAddress common.Address) (*apitypes.TypedData, error) {
 	// Use timestamp-based nonce for uniqueness
 	nonce := uint64(time.Now().UnixNano())
 
@@ -664,6 +674,16 @@ func (s *EthereumBlockchainService) GeneratePermit2SignatureData(playerAddress c
 		Signature:   "", // Will be set when signature is received
 	}
 
+	ethclient, ok := s.client.(*ethclient.Client)
+	if !ok {
+		return nil, fmt.Errorf("client is not an ethclient.Client")
+	}
+	chainID, err := ethclient.ChainID(context.Background())
+	if err != nil {
+		return nil, fmt.Errorf("failed to get chain ID: %v", err)
+	}
+	chainIDUint32 := uint32(chainID.Uint64())
+
 	// Create EIP-712 typed data for Permit2 allowance-based permit
 	typedData := &apitypes.TypedData{
 		Types: apitypes.Types{
@@ -687,8 +707,8 @@ func (s *EthereumBlockchainService) GeneratePermit2SignatureData(playerAddress c
 		PrimaryType: "PermitSingle",
 		Domain: apitypes.TypedDataDomain{
 			Name:              "Permit2",
-			ChainId:           (*math.HexOrDecimal256)(big.NewInt(int64(chainId))),
-			VerifyingContract: Permit2ContractAddressByChain[chainId],
+			ChainId:           (*math.HexOrDecimal256)(chainID),
+			VerifyingContract: Permit2ContractAddressByChain[chainIDUint32],
 		},
 		Message: apitypes.TypedDataMessage{
 			"details": map[string]interface{}{
@@ -706,13 +726,22 @@ func (s *EthereumBlockchainService) GeneratePermit2SignatureData(playerAddress c
 }
 
 // Request Permit2 signature (no amount needed!)
-func (s *EthereumBlockchainService) RequestPermit2(playerAddress common.Address, chainId uint32) (*apitypes.TypedData, error) {
-	return s.GeneratePermit2SignatureData(playerAddress, chainId)
+func (s *EthereumBlockchainService) RequestPermit2(playerAddress common.Address) (*apitypes.TypedData, error) {
+	return s.GeneratePermit2SignatureData(playerAddress)
 }
 
 // Add this method after getUSDCContract
-func (s *EthereumBlockchainService) getPermit2Contract(chainId uint32) (*permit2.Permit2, error) {
-	permit2ContractAddress := Permit2ContractAddressByChain[chainId]
+func (s *EthereumBlockchainService) getPermit2Contract() (*permit2.Permit2, error) {
+	ethclient, ok := s.client.(*ethclient.Client)
+	if !ok {
+		return nil, fmt.Errorf("client is not an ethclient.Client")
+	}
+	chainID, err := ethclient.ChainID(context.Background())
+	if err != nil {
+		return nil, fmt.Errorf("failed to get chain ID: %v", err)
+	}
+	chainIDUint32 := uint32(chainID.Uint64())
+	permit2ContractAddress := Permit2ContractAddressByChain[chainIDUint32]
 	return permit2.NewPermit2(common.HexToAddress(permit2ContractAddress), s.client)
 }
 
@@ -741,7 +770,7 @@ type PermitData struct {
 }
 
 // ExecutePermit2 executes a Permit2 allowance using the stored signature
-func (s *EthereumBlockchainService) ExecutePermit2(playerAddress common.Address, chainId uint32) error {
+func (s *EthereumBlockchainService) ExecutePermit2(playerAddress common.Address) error {
 	// Get the stored permit data
 	permitData, exists := s.permits[playerAddress]
 	if !exists {
@@ -749,7 +778,7 @@ func (s *EthereumBlockchainService) ExecutePermit2(playerAddress common.Address,
 	}
 
 	// Get Permit2 contract
-	permit2Contract, err := s.getPermit2Contract(chainId)
+	permit2Contract, err := s.getPermit2Contract()
 	if err != nil {
 		return fmt.Errorf("failed to get Permit2 contract: %v", err)
 	}

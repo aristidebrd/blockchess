@@ -327,7 +327,7 @@ func (h *Hub) handleMessage(msg *Message, client *Client) {
 		}
 
 		// Attempt to vote
-		if err := h.gameManager.VoteForMove(msg.GameID, walletAddress, msg.Move, team, msg.ChainId); err != nil {
+		if err := h.gameManager.VoteForMove(msg.GameID, walletAddress, msg.Move, team); err != nil {
 			log.Printf("Vote failed for player %s: %v", walletAddress, err)
 			h.sendErrorToClient(client, err.Error())
 			return
@@ -560,7 +560,6 @@ func (h *Hub) handleMessage(msg *Message, client *Client) {
 
 	case TypeRequestPermit2:
 		walletAddress := msg.WalletAddress
-		chainId := msg.ChainId
 		if walletAddress == "" {
 			log.Printf("No wallet address provided for permit2 request from client %s", client.id)
 			h.sendErrorToClient(client, "Wallet address is required for permit2 request")
@@ -570,7 +569,7 @@ func (h *Hub) handleMessage(msg *Message, client *Client) {
 		// Store the wallet address mapping for this client
 		h.clientWallets[client] = walletAddress
 
-		permit2Data, err := h.gameManager.GeneratePermit2SignatureData(walletAddress, chainId)
+		permit2Data, err := h.gameManager.GeneratePermit2SignatureData(walletAddress)
 		if err != nil {
 			log.Printf("Failed to generate permit2 data for wallet %s: %v", walletAddress, err)
 			h.sendErrorToClient(client, "Failed to generate permit2 data")
@@ -582,7 +581,7 @@ func (h *Hub) handleMessage(msg *Message, client *Client) {
 	case TypeSubmitPermit2Signature:
 		walletAddress := msg.WalletAddress
 		signature := msg.Signature
-		chainId := msg.ChainId
+
 		if walletAddress == "" {
 			log.Printf("No wallet address provided for permit2 signature from client %s", client.id)
 			h.sendErrorToClient(client, "Wallet address is required for permit2 signature")
@@ -604,7 +603,7 @@ func (h *Hub) handleMessage(msg *Message, client *Client) {
 		}
 
 		// Execute the permit2 allowance
-		err = h.gameManager.ExecutePermit2(walletAddress, chainId)
+		err = h.gameManager.ExecutePermit2(walletAddress)
 		if err != nil {
 			log.Printf("Failed to execute permit2 for wallet %s: %v", walletAddress, err)
 			h.sendErrorToClient(client, "Failed to execute permit2")

@@ -374,7 +374,7 @@ func (m *Manager) getBestMove(game *GameState) string {
 }
 
 // VoteForMove allows a player to vote for a move
-func (m *Manager) VoteForMove(gameID, walletAddress, move string, team string, chainId uint32) error {
+func (m *Manager) VoteForMove(gameID, walletAddress, move string, team string) error {
 	m.mu.RLock()
 	game, exists := m.games[gameID]
 	m.mu.RUnlock()
@@ -447,7 +447,7 @@ func (m *Manager) VoteForMove(gameID, walletAddress, move string, team string, c
 			if team == "black" {
 				teamCode = 1
 			}
-			if err := m.blockchainService.RecordMove(gameID, player, chainId, teamCode); err != nil {
+			if err := m.blockchainService.RecordMove(gameID, player, teamCode); err != nil {
 				log.Printf("Error recording move on blockchain: %v", err)
 			}
 
@@ -955,7 +955,7 @@ func (m *Manager) SetBlockchainService(service BlockchainService) {
 }
 
 // GeneratePermit2SignatureData generates Permit2 typed data for signing
-func (m *Manager) GeneratePermit2SignatureData(walletAddress string, chainId uint32) (interface{}, error) {
+func (m *Manager) GeneratePermit2SignatureData(walletAddress string) (interface{}, error) {
 	if m.blockchainService == nil {
 		return nil, fmt.Errorf("blockchain service not available")
 	}
@@ -968,7 +968,7 @@ func (m *Manager) GeneratePermit2SignatureData(walletAddress string, chainId uin
 		return nil, fmt.Errorf("blockchain service does not support Permit2")
 	}
 
-	return ethService.GeneratePermit2SignatureData(playerAddr, chainId)
+	return ethService.GeneratePermit2SignatureData(playerAddr)
 }
 
 // StorePermit2Signature stores a signed Permit2 signature for a player
@@ -989,7 +989,7 @@ func (m *Manager) StorePermit2Signature(walletAddress, signature string) error {
 }
 
 // ExecutePermit2 executes a Permit2 allowance using the stored signature
-func (m *Manager) ExecutePermit2(walletAddress string, chainId uint32) error {
+func (m *Manager) ExecutePermit2(walletAddress string) error {
 	if m.blockchainService == nil {
 		return fmt.Errorf("blockchain service not available")
 	}
@@ -1002,7 +1002,7 @@ func (m *Manager) ExecutePermit2(walletAddress string, chainId uint32) error {
 		return fmt.Errorf("blockchain service does not support Permit2")
 	}
 
-	return ethService.ExecutePermit2(playerAddr, chainId)
+	return ethService.ExecutePermit2(playerAddr)
 }
 
 // GetClients returns the blockchain clients for multi-chain operations
