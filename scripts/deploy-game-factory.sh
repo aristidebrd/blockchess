@@ -15,7 +15,9 @@ NC='\033[0m' # No Color
 # Configuration
 SCRIPT_PATH="contracts/script/DeployGameFactory.s.sol:DeployGameFactory"
 NETWORK="base-sepolia"
-RPC_URL_VAR="BASE_SEPOLIA_RPC_URL"
+RPC_URL_VAR="https://base-sepolia.g.alchemy.com/v2/"
+PRIVATE_KEY="22r8dairb21cjlw7" 
+BASESCAN_API_KEY="5RE2C7SV8V161RH224YHNN8VCA7ZI58IQK"
 
 echo -e "${BLUE}🚀 GameFactory Deployment Script${NC}"
 echo -e "${BLUE}=================================${NC}"

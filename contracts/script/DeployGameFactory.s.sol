@@ -32,15 +32,6 @@ contract DeployGameFactory is Script {
 
         console.log("GameFactory deployed at:", address(gameFactory));
         console.log("Deployment successful!");
-
-        // Verify the deployment
-        console.log("Verifying deployment...");
-        console.log(
-            "Authorized backend from contract:",
-            gameFactory.getAuthorizedBackend()
-        );
-        console.log("Next game ID:", gameFactory.getNextGameId());
-        console.log("Total games count:", gameFactory.getTotalGamesCount());
     }
 
     function deployToBaseSepolia() external {
