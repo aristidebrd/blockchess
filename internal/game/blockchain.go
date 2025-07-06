@@ -1,9 +1,9 @@
 package game
 
 import (
-	"blockchess/contracts/gamecontract"
-	"blockchess/contracts/permit2"
-	"blockchess/contracts/vaultcontract"
+	"blockchess/contracts-bindings/gamecontract"
+	"blockchess/contracts-bindings/permit2"
+	"blockchess/contracts-bindings/vaultcontract"
 	"context"
 	"crypto/ecdsa"
 	"encoding/hex"
