@@ -1,68 +1,134 @@
 # BlockChess - Community-Driven Chess Voting Game
 
-A real-time collaborative chess game where users vote for the next move. Built with React + Vite + TypeScript on the frontend and Go (Golang) as the backend, with WebSocket communication for real-time updates.
+A real-time collaborative chess game where users vote for the next move. Built with React + Vite + TypeScript on the frontend, Go (Golang) backend, and Solidity smart contracts for blockchain integration with multi-chain USDC support via Circle's CCTP.
 
 ## 🏗️ Architecture
 
+### **System Overview**
 ```
-[Player Browser]
-     |
-     | UI + WalletConnect
-     v
-[Frontend: Vite + React + TS]   ←──────→  [Backend: Go HTTP + WebSocket]
-     |                                            |
-     | WebSocket `/ws`                           | HTTP (serves index.html)
-     v                                            v
-[WebSocket connection to Go]               [Game logic, timers, voting]
+[Player Browser] ←→ [Frontend: React + TS] ←→ [Backend: Go + WebSocket] ←→ [Smart Contracts]
+     │                      │                          │                        │
+     │                      │                          │                        │
+     ▼                      ▼                          ▼                        ▼
+[WalletConnect]     [Game UI + Voting]        [Game Logic + Timer]      [USDC Staking + CCTP]
+```
+
+### **Application Layers**
+
+#### **1. Application Layer (`App.tsx`)**
+- Wallet connection management
+- Games list display & WebSocket subscription  
+- Total players count tracking
+- Matchmaking logic (start/cancel/callbacks)
+- Navigation between lobby/game views
+- Global header and footer components
+
+#### **2. Game Engine (`gameService.ts`)**
+- Game state management (timer, turns, voting)
+- WebSocket game-specific subscriptions
+- Move validation and creation logic
+- Player role management within games
+- Board state management
+- Vote tracking and validation
+
+#### **3. Presentation Layer (`GameView.tsx`)**
+- Pure presentation of game state
+- User interactions (click handlers)
+- UI components (ChessBoard, VotingPanel, Timer)
+- Move confirmation dialogs
+
+#### **4. Blockchain Layer (Smart Contracts)**
+- **GameFactory**: Creates and manages game instances
+- **GameContract**: Individual game state and voting tracking
+- **VaultContract**: USDC staking and cross-chain rewards via CCTP
+
+### **Data Flow**
+```
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   WebSocket     │───▶│   GameService   │───▶│   GameView      │
+│   Backend       │    │   (Engine)      │    │   (UI)          │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+         │                       │                       │
+         │                       ▼                       │
+         │              ┌─────────────────┐              │
+         └─────────────▶│     App.tsx     │◀─────────────┘
+                        │ (Application)   │
+                        │ + Header/Footer │
+                        └─────────────────┘
+                                 │
+                                 ▼
+                        ┌─────────────────┐
+                        │ Smart Contracts │
+                        │ (Blockchain)    │
+                        └─────────────────┘
 ```
 
 ## 🚀 Features
 
+### **Core Gameplay**
 - **Real-time voting**: Players vote for chess moves in real-time
 - **WebSocket communication**: Live updates for votes, moves, and timer
-- **WalletConnect integration**: Connect crypto wallets (frontend-only for now)
-- **30-second turns**: Each turn has a 30-second timer
-- **Single binary deployment**: Go backend serves both API and frontend
-- **Game Lobby**: Browse and join active games
+- **Team-based gameplay**: Join white or black teams
+- **15-second turns**: Each turn has a 15-second timer
+- **Game lobby**: Browse and join active games
+- **Matchmaking**: Quick play system
+
+### **Blockchain Integration**
+- **USDC staking**: Stake USDC to join games
+- **Multi-chain support**: 11 supported testnets via Circle's CCTP
+- **Cross-chain rewards**: Automatic USDC distribution to winners
+- **Smart contract voting**: On-chain vote tracking and game results
+- **Wallet integration**: Connect via WalletConnect/RainbowKit
+
+### **Supported Networks**
+- Ethereum Sepolia
+- Base Sepolia
+- Optimism Sepolia
+- Arbitrum Sepolia
+- Avalanche Fuji
+- Polygon Amoy
+- Unichain Sepolia
+- Linea Sepolia
+- Sonic Testnet
+- World Chain Sepolia
+- Codex Testnet
 
 ## 🛠️ Tech Stack
 
-### Frontend
+### **Frontend**
 - React + TypeScript
 - Vite for fast development and building
-- WalletConnect for wallet integration
+- RainbowKit + Wagmi for wallet integration
 - WebSocket client for real-time updates
 - Tailwind CSS for styling
 
-### Backend
+### **Backend**
 - Go (Golang)
 - Gorilla WebSocket for WebSocket handling
 - Gorilla Mux for HTTP routing
 - In-memory game state management
+- Blockchain integration via Go-Ethereum
 
-## 📡 WebSocket Protocol
+### **Smart Contracts**
+- Solidity ^0.8.30
+- Foundry for development and deployment
+- Circle's CCTP for cross-chain USDC transfers
+- Multi-chain deployment support
 
-### Client → Server Messages:
-```json
-{ "type": "join_game", "gameId": "game-123" }
-{ "type": "vote_move", "move": "e2e4" }
-```
-
-### Server → Client Messages:
-```json
-{ "type": "vote_update", "votes": { "e2e4": 4, "d2d4": 2 } }
-{ "type": "move_result", "move": "e2e4" }
-{ "type": "timer_tick", "secondsLeft": 14 }
-```
+### **Development Tools**
+- Foundry (forge, anvil, cast)
+- Go bindings generation
+- Automated deployment scripts
+- Local blockchain forking
 
 ## 🚀 Getting Started
 
-### Prerequisites
+### **Prerequisites**
 - Node.js 18+ and npm
 - Go 1.23+
-- Foundry (for Anvil local blockchain) - Install from [getfoundry.sh](https://getfoundry.sh/)
+- Foundry (for blockchain features) - [Install here](https://getfoundry.sh/)
 
-### Development Setup
+### **Development Setup**
 
 1. **Clone the repository**
 ```bash
@@ -75,58 +141,59 @@ cd blockchess
 npm install
 ```
 
-3. **Start local blockchain (for complete test setup)**
+3. **Start local blockchain (optional - for full blockchain testing)**
 ```bash
-npm run anvil
+# Start Anvil with Base Sepolia fork
+./credit_usdc.sh start
 ```
-This starts a local Ethereum test network using Foundry's Anvil. Required for wallet connections and testing the full blockchain integration.
 
-4. **Start the Go backend**
+4. **Deploy smart contracts (optional)**
 ```bash
-cd backend
-go run cmd/server/main.go
-```
-The backend will run on http://localhost:8080
+# Deploy to local Anvil
+./deploy-contracts.sh
 
-5. **In another terminal, run frontend development server**
+# Or deploy to specific testnet
+./deploy-game-factory.sh
+```
+
+5. **Start the Go backend**
+```bash
+go run main.go
+```
+
+6. **Start frontend development server**
 ```bash
 npm run dev
 ```
-The frontend will run on http://localhost:5173
 
-⚠️ **Important**: In development, always access the app through http://localhost:5173. The Vite dev server will proxy WebSocket connections to the Go backend automatically.
+The application will be available at:
+- Frontend: http://localhost:5173
+- Backend: http://localhost:8080
 
-### Production Build
+### **Production Build**
 
 1. **Build the frontend**
 ```bash
 npm run build
 ```
 
-2. **Copy dist to backend**
+2. **Build the Go backend**
 ```bash
-cp -r dist backend/
+go build -o blockchess-server main.go
 ```
 
-3. **Build the Go backend**
-```bash
-cd backend
-go build -o blockchess-server cmd/server/main.go
-```
-
-4. **Run the server**
+3. **Run the server**
 ```bash
 ./blockchess-server -addr=:8080
 ```
 
-The entire application (frontend + backend) will be served on http://localhost:8080
+The entire application will be served on http://localhost:8080
 
-## 💰 Credit USDC for Testing
+## 💰 USDC Testing Setup
 
-For testing the blockchain integration features, you'll need USDC tokens on your Anvil accounts. We provide a convenient script to credit your accounts with USDC from Base Sepolia.
+For testing blockchain features, you'll need USDC tokens. We provide a convenient script:
 
-### Quick Start
-
+### **Quick Start**
 ```bash
 # Start Anvil and credit accounts with 10,000 USDC each
 ./credit_usdc.sh start
@@ -138,109 +205,188 @@ For testing the blockchain integration features, you'll need USDC tokens on your
 ./credit_usdc.sh stop
 ```
 
-### Available Commands
-
+### **Available Commands**
 - `./credit_usdc.sh start` - Start Anvil with Base Sepolia fork and credit accounts
 - `./credit_usdc.sh balance` - Check current USDC balances
-- `./credit_usdc.sh deploy` - Deploy CreditUSDC contract (if Anvil is already running)
-- `./credit_usdc.sh status` - Check if Anvil is running and show balances
+- `./credit_usdc.sh deploy` - Deploy CreditUSDC contract
+- `./credit_usdc.sh status` - Check Anvil status
 - `./credit_usdc.sh stop` - Stop Anvil
-- `./credit_usdc.sh help` - Show help message
 
-### What the Script Does
-
-The script automatically:
-1. **Starts Anvil** with a Base Sepolia fork at `http://127.0.0.1:8545`
-2. **Deploys a credit contract** that transfers USDC from a whale account
-3. **Credits 10,000 USDC** to two default Anvil accounts:
-   - Account 1: `0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266`
-   - Account 2: `0x70997970C51812dc3A010C7d01b50e0d17dc79C8`
-
-### Adding USDC to MetaMask
-
-To see your USDC balance in MetaMask:
-
-1. **Connect MetaMask to Anvil**:
+### **MetaMask Setup**
+1. **Add Anvil Network**:
    - Network Name: `Anvil Local`
    - RPC URL: `http://127.0.0.1:8545`
    - Chain ID: `31337`
    - Currency Symbol: `ETH`
 
 2. **Import USDC Token**:
-   - Click "Import tokens" in MetaMask
-   - **Token Contract Address**: `0x036CbD53842c5426634e7929541eC2318f3dCF7e`
-   - **Token Symbol**: `USDC`
-   - **Token Decimals**: `6`
+   - Contract Address: `0x036CbD53842c5426634e7929541eC2318f3dCF7e`
+   - Symbol: `USDC`
+   - Decimals: `6`
 
-3. **Import Anvil Account** (optional):
-   - Use the private key: `0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80`
-   - This corresponds to the first Anvil account that gets credited with USDC
+## 🏗️ Smart Contract Deployment
 
-### Prerequisites for USDC Script
+### **Local Development**
+```bash
+# Deploy all contracts to local Anvil
+./deploy-contracts.sh
+```
 
-Make sure you have these tools installed:
-- **Foundry** (anvil, forge, cast) - [Install here](https://getfoundry.sh/)
-- **bc** - For balance calculations: `sudo apt-get install bc`
-- **curl** - Usually pre-installed on most systems
+### **Testnet Deployment**
+```bash
+# Deploy GameFactory to Base Sepolia
+./deploy-game-factory.sh
 
-### Troubleshooting
+# Deploy VaultContract to all supported testnets
+./deploy-cctp-vault.sh all
 
-- **Script fails to start**: Make sure Foundry is installed and `anvil` is in your PATH
-- **No USDC showing**: Verify you've imported the correct token contract address in MetaMask
-- **Connection issues**: Ensure Anvil is running on port 8545 and MetaMask is connected to the right network
+# Deploy to specific testnet
+./deploy-cctp-vault.sh deploy base-sepolia
+```
 
-## �� Project Structure
+### **Environment Configuration**
+Create a `.env` file:
+```env
+# Blockchain Configuration
+PRIVATE_KEY=your_private_key_here
+GO_BACKEND_ADDRESS=your_backend_address_here
+
+# RPC URLs for different networks
+BASE_SEPOLIA_RPC_URL=https://sepolia.base.org
+ETHEREUM_SEPOLIA_RPC_URL=https://sepolia.infura.io/v3/your_key
+# ... other networks
+
+# Contract Addresses (auto-populated by deployment scripts)
+GAME_CONTRACT_ADDRESS=0x...
+VAULT_CONTRACT_ADDRESS=0x...
+```
+
+## 📁 Project Structure
 
 ```
 blockchess/
-├── src/                    # Frontend React source
-│   ├── components/         # React components
-│   ├── services/          # WebSocket service
-│   ├── types/             # TypeScript types
-│   └── utils/             # Utility functions
-├── backend/               # Go backend
-│   ├── cmd/server/        # Main server entry point
-│   ├── internal/          # Internal packages
-│   │   ├── game/         # Game logic
-│   │   └── websocket/    # WebSocket handling
-│   └── dist/             # Built frontend (production)
-├── package.json          # Frontend dependencies
-└── vite.config.ts       # Vite configuration
+├── src/                          # Frontend React source
+│   ├── components/               # React components
+│   │   ├── GameView.tsx         # Main game interface
+│   │   ├── GameLobby.tsx        # Game lobby
+│   │   ├── ChessBoard.tsx       # Chess board component
+│   │   ├── VotingPanel.tsx      # Voting interface
+│   │   └── ApprovalFlow.tsx     # USDC approval flow
+│   ├── services/                # Frontend services
+│   │   ├── gameService.ts       # Game logic service
+│   │   └── websocket.ts         # WebSocket communication
+│   ├── contexts/                # React contexts
+│   └── utils/                   # Utility functions
+├── internal/                    # Go backend source
+│   ├── game/                    # Game logic
+│   │   ├── manager.go          # Game manager
+│   │   ├── blockchain.go       # Blockchain integration
+│   │   └── config.go           # Configuration
+│   └── websocket/              # WebSocket handling
+│       ├── hub.go              # WebSocket hub
+│       └── client.go           # Client management
+├── contracts/                   # Smart contracts
+│   ├── src/                    # Solidity source
+│   │   ├── GameFactory.sol     # Game factory contract
+│   │   ├── GameContract.sol    # Individual game contract
+│   │   └── VaultContract.sol   # USDC vault with CCTP
+│   ├── script/                 # Deployment scripts
+│   └── common/interfaces/      # Contract interfaces
+├── contracts-bindings/         # Go contract bindings
+├── main.go                     # Go backend entry point
+├── package.json               # Frontend dependencies
+├── go.mod                     # Go dependencies
+├── foundry.toml              # Foundry configuration
+└── deployment scripts/       # Automated deployment
+    ├── deploy-contracts.sh
+    ├── deploy-game-factory.sh
+    ├── deploy-cctp-vault.sh
+    └── credit_usdc.sh
 ```
 
 ## 🎮 How to Play
 
-1. Connect your wallet using WalletConnect
-2. Browse available games in the lobby or click "Quick Play"
-3. Join a game to enter the chess board
-4. Click on the chess board to vote for moves
-5. Watch the timer countdown - the most voted move executes when time runs out
-6. The game alternates between white and black turns
+1. **Connect your wallet** using WalletConnect/RainbowKit
+2. **Browse games** in the lobby or use "Quick Play"
+3. **Stake USDC** to join a game (testnet only)
+4. **Join a team** (white or black)
+5. **Vote for moves** by clicking on the chess board
+6. **Watch the timer** - most voted move executes when time runs out
+7. **Win rewards** - USDC distributed to winning team
 
 ## 🔧 Configuration
 
-- **Backend port**: Change with `-addr` flag (default: `:8080`)
-- **Turn duration**: Modify `TimeLeft` in `backend/internal/game/manager.go` (default: 15 seconds)
-- **Game ID**: Currently hardcoded as "game-123" in the frontend
+### **Backend Configuration**
+- **Port**: Change with `-addr` flag (default: `:8080`)
+- **Turn duration**: Modify `GameTimerSeconds` in `internal/game/manager.go`
+- **Blockchain**: Configure via `.env` file
+
+### **Smart Contract Configuration**
+- **Stake amounts**: Configurable per game
+- **Supported chains**: Add new chains in `VaultContract.sol`
+- **CCTP domains**: Configured for all supported testnets
 
 ## 🚢 Deployment
 
-The application is designed to run as a single Go binary that serves both the frontend and backend:
+### **Single Binary Deployment**
+```bash
+# Build everything
+npm run build
+go build -o blockchess-server main.go
 
-1. Build the frontend: `npm run build`
-2. Copy dist to backend: `cp -r dist backend/`
-3. Build Go binary: `cd backend && go build -o blockchess-server cmd/server/main.go`
-4. Deploy the binary and run it on your server
+# Deploy
+./blockchess-server -addr=:8080
+```
 
-The server will:
-- Serve the React frontend on `/`
-- Handle WebSocket connections on `/ws`
-- Manage game state and broadcasting
+### **Docker Deployment**
+```dockerfile
+FROM golang:1.23-alpine AS builder
+WORKDIR /app
+COPY . .
+RUN npm install && npm run build
+RUN go build -o blockchess-server main.go
+
+FROM alpine:latest
+RUN apk --no-cache add ca-certificates
+WORKDIR /root/
+COPY --from=builder /app/blockchess-server .
+COPY --from=builder /app/dist ./dist
+CMD ["./blockchess-server"]
+```
+
+## 🧪 Testing
+
+### **Frontend Testing**
+```bash
+npm run test
+```
+
+### **Smart Contract Testing**
+```bash
+forge test
+```
+
+### **Integration Testing**
+```bash
+# Start full stack locally
+./credit_usdc.sh start
+./deploy-contracts.sh
+go run main.go &
+npm run dev
+```
 
 ## 🤝 Contributing
 
-Feel free to submit issues and pull requests!
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Test thoroughly
+5. Submit a pull request
 
 ## 📄 License
 
-MIT
+MIT License
+
+---
+
+**Built with ❤️ for ETHGlobal Cannes 2025**
