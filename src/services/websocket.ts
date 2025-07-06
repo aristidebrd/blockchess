@@ -97,10 +97,23 @@ export interface Permit2Data {
     permit2Data: any; // The EIP-712 typed data structure
 }
 
-export type ServerMessage = VoteUpdate | MoveResult | TimerTick | MatchFound | GamesList | GamesListUpdate | TotalNumberOfPlayers | ClientConnected | ErrorMessage | PlayerStatus | ValidMovesResponse | Permit2Data;
+export interface PermitSignature {
+    type: 'permit_signature';
+    walletAddress: string;
+    chainId: number;
+    typedData: any; // The EIP-712 typed data structure
+}
+
+export interface PermitValid {
+    type: 'permit_valid';
+    walletAddress: string;
+    chainId: number;
+}
+
+export type ServerMessage = VoteUpdate | MoveResult | TimerTick | MatchFound | GamesList | GamesListUpdate | TotalNumberOfPlayers | ClientConnected | ErrorMessage | PlayerStatus | ValidMovesResponse | Permit2Data | PermitSignature | PermitValid;
 
 export interface ClientMessage {
-    type: 'join_game' | 'vote_move' | 'join_team' | 'watch_game' | 'join_matchmaking' | 'leave_matchmaking' | 'request_games_list' | 'request_filtered_games_list' | 'check_player_status' | 'get_valid_moves' | 'request_permit2' | 'submit_permit2_signature';
+    type: 'join_game' | 'vote_move' | 'join_team' | 'watch_game' | 'join_matchmaking' | 'leave_matchmaking' | 'request_games_list' | 'request_filtered_games_list' | 'check_player_status' | 'get_valid_moves' | 'request_permit2' | 'submit_permit2_signature' | 'request_permit_signature' | 'permit_signature';
     gameId?: string;
     move?: string;
     team?: 'white' | 'black';
@@ -109,6 +122,7 @@ export interface ClientMessage {
     filter?: string;
     signature?: string;
     typedData?: any;
+    chainId?: number;
 }
 
 export class WebSocketService {
@@ -301,6 +315,23 @@ export class WebSocketService {
             type: 'submit_permit2_signature',
             walletAddress,
             signature
+        });
+    }
+
+    public requestPermitSignature(walletAddress: string, chainId: number) {
+        this.send({
+            type: 'request_permit_signature',
+            walletAddress,
+            chainId
+        });
+    }
+
+    public submitPermitSignature(walletAddress: string, signature: string, chainId: number) {
+        this.send({
+            type: 'permit_signature',
+            walletAddress,
+            signature,
+            chainId
         });
     }
 

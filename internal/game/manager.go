@@ -1,6 +1,7 @@
 package game
 
 import (
+	"blockchess/internal/client"
 	"fmt"
 	"log"
 	"math/big"
@@ -10,7 +11,7 @@ import (
 
 	"github.com/corentings/chess/v2"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/google/uuid"
 )
 
 // Constants
@@ -52,6 +53,9 @@ type GameState struct {
 	BlackTeamTotalVotes int
 	PlayerTotalVotes    map[string]int // walletAddress -> total votes made throughout the game
 
+	// Blockchain integration
+	BlockchainGameID uint64 // Game ID from the smart contract
+
 	mu sync.RWMutex
 }
 
@@ -62,56 +66,66 @@ type Manager struct {
 	moveResultCallback func(gameID, move string)
 	gameEndCallback    func(gameID, winner, reason string, gameStats map[string]any)
 
-	// Services (dependency injection)
-	blockchainService BlockchainService
-	configService     ConfigService
-	endGameProcessor  *EndGameProcessor
-
 	// Blockchain clients for multi-chain operations
-	clients *Clients
+	clients        *client.Clients
+	gameFactory    *client.GameFactory
+	vaultManager   *client.VaultManager
+	permit2Manager *client.Permit2Manager
+
+	// Player chain ID mapping - walletAddress -> chainID
+	playerChainIDs map[string]uint32
+	chainIDMutex   sync.RWMutex
+
+	// Player permit signatures - walletAddress -> permit signature data
+	playerPermits map[string]*client.PermitSignatureData
+	permitMutex   sync.RWMutex
 }
 
-// NewManager creates a new game manager with default services
-func NewManager() *Manager {
-	configService := NewConfigService()
-
-	// Try to initialize blockchain service
-	var blockchainService BlockchainService
-	config, _ := configService.LoadBlockchainConfig()
-	blockchainService, _ = NewEthereumBlockchainService(config)
-
-	return &Manager{
-		games:             make(map[string]*GameState),
-		blockchainService: blockchainService,
-		configService:     configService,
+func NewGamesManager(clients *client.Clients) *Manager {
+	// Initialize GameFactory with Base Sepolia client
+	var gameFactory *client.GameFactory
+	baseSepoliaChainID := uint64(84532)
+	baseSepoliaClient, err := clients.GetClientByChainID(baseSepoliaChainID)
+	if err != nil {
+		log.Printf("Warning: Failed to get Base Sepolia client: %v", err)
+	} else {
+		privateKey := clients.GetPrivateKey()
+		if privateKey == "" {
+			log.Printf("Warning: No private key available for GameFactory")
+		} else {
+			gameFactory, err = client.NewGameFactory(baseSepoliaClient, privateKey)
+			if err != nil {
+				log.Printf("Warning: Failed to initialize GameFactory: %v", err)
+			}
+		}
 	}
-}
 
-// NewManagerWithClients creates a new game manager with blockchain clients
-func NewManagerWithClients(clients *Clients) *Manager {
-	configService := NewConfigService()
-
-	// Try to initialize blockchain service
-	var blockchainService BlockchainService
-	config, _ := configService.LoadBlockchainConfig()
-	blockchainService, _ = NewEthereumBlockchainService(config)
-
-	return &Manager{
-		games:             make(map[string]*GameState),
-		blockchainService: blockchainService,
-		configService:     configService,
-		endGameProcessor:  NewEndGameProcessor(blockchainService),
-		clients:           clients,
+	// Initialize VaultManager for all chains
+	vaultManager, err := client.NewVaultManager(clients)
+	if err != nil {
+		log.Printf("Warning: Failed to initialize VaultManager: %v", err)
+	} else {
+		availableChains := vaultManager.GetAvailableChains()
+		log.Printf("VaultManager initialized with %d chains: %v", len(availableChains), availableChains)
 	}
-}
 
-// NewManagerWithServices creates a new game manager with injected services
-func NewManagerWithServices(blockchainService BlockchainService, configService ConfigService) *Manager {
+	// Initialize Permit2Manager for all chains
+	permit2Manager, err := client.NewPermit2Manager(clients)
+	if err != nil {
+		log.Printf("Warning: Failed to initialize Permit2Manager: %v", err)
+	} else {
+		availableChains := permit2Manager.GetAvailableChains()
+		log.Printf("Permit2Manager initialized with %d chains: %v", len(availableChains), availableChains)
+	}
+
 	return &Manager{
-		games:             make(map[string]*GameState),
-		blockchainService: blockchainService,
-		configService:     configService,
-		endGameProcessor:  NewEndGameProcessor(blockchainService),
+		games:          make(map[string]*GameState),
+		clients:        clients,
+		gameFactory:    gameFactory,
+		vaultManager:   vaultManager,
+		permit2Manager: permit2Manager,
+		playerChainIDs: make(map[string]uint32),
+		playerPermits:  make(map[string]*client.PermitSignatureData),
 	}
 }
 
@@ -125,25 +139,140 @@ func (m *Manager) SetGameEndCallback(callback func(gameID, winner, reason string
 	m.gameEndCallback = callback
 }
 
+// SetPlayerChainID sets the chain ID for a player (called during matchmaking)
+func (m *Manager) SetPlayerChainID(walletAddress string, chainID uint32) {
+	m.chainIDMutex.Lock()
+	defer m.chainIDMutex.Unlock()
+	m.playerChainIDs[walletAddress] = chainID
+	log.Printf("Set chain ID %d for player %s", chainID, walletAddress)
+}
+
+// GetPlayerChainID gets the chain ID for a player
+func (m *Manager) GetPlayerChainID(walletAddress string) uint32 {
+	m.chainIDMutex.RLock()
+	defer m.chainIDMutex.RUnlock()
+	return m.playerChainIDs[walletAddress]
+}
+
+// StorePlayerPermit stores a permit signature for a player
+func (m *Manager) StorePlayerPermit(walletAddress string, permitData *client.PermitSignatureData) {
+	m.permitMutex.Lock()
+	defer m.permitMutex.Unlock()
+	m.playerPermits[walletAddress] = permitData
+	log.Printf("Stored permit signature for player %s on chain %d", walletAddress, permitData.ChainID)
+}
+
+// GetPlayerPermit retrieves a permit signature for a player
+func (m *Manager) GetPlayerPermit(walletAddress string) *client.PermitSignatureData {
+	m.permitMutex.RLock()
+	defer m.permitMutex.RUnlock()
+	return m.playerPermits[walletAddress]
+}
+
+// CreatePermitForPlayer creates a permit signature request for a player
+func (m *Manager) CreatePermitForPlayer(walletAddress string, chainID uint32) (*client.PermitSignatureData, interface{}, error) {
+	if m.permit2Manager == nil {
+		return nil, nil, fmt.Errorf("Permit2 manager not available")
+	}
+
+	// Get the Permit2 client for the player's chain
+	permit2Client, err := m.permit2Manager.GetPermit2Client(uint64(chainID))
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to get Permit2 client for chain %d: %w", chainID, err)
+	}
+
+	// Get the vault address for the player's chain
+	vaultAddress := client.GetVaultAddress(uint64(chainID))
+	if vaultAddress == "" {
+		return nil, nil, fmt.Errorf("no vault address configured for chain %d", chainID)
+	}
+
+	// Create permit signature data
+	owner := common.HexToAddress(walletAddress)
+	vault := common.HexToAddress(vaultAddress)
+
+	permitData, typedData, err := permit2Client.CreateGameStakePermit(owner, vault)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create permit: %w", err)
+	}
+
+	log.Printf("Created permit for player %s on chain %d (vault: %s)", walletAddress, chainID, vaultAddress)
+	return permitData, typedData, nil
+}
+
+// HasValidPermit checks if a player has a valid permit signature
+func (m *Manager) HasValidPermit(walletAddress string, chainID uint32) bool {
+	permitData := m.GetPlayerPermit(walletAddress)
+	if permitData == nil {
+		return false
+	}
+
+	// Check if the permit is for the correct chain
+	if permitData.ChainID != uint64(chainID) {
+		return false
+	}
+
+	// Check if the permit signature is present
+	if permitData.Signature == "" {
+		return false
+	}
+
+	// Check if the permit hasn't expired (signature deadline)
+	now := big.NewInt(time.Now().Unix())
+	if permitData.SigDeadline.Cmp(now) <= 0 {
+		log.Printf("Permit expired for player %s on chain %d", walletAddress, chainID)
+		return false
+	}
+
+	return true
+}
+
+// EnsurePlayerPermit ensures a player has a valid permit for their chain
+func (m *Manager) EnsurePlayerPermit(walletAddress string, chainID uint32) error {
+	if m.HasValidPermit(walletAddress, chainID) {
+		return nil // Already has valid permit
+	}
+
+	// Check if we have permit data but it's invalid
+	permitData := m.GetPlayerPermit(walletAddress)
+	if permitData != nil {
+		if permitData.ChainID != uint64(chainID) {
+			return fmt.Errorf("permit is for chain %d, but player is on chain %d", permitData.ChainID, chainID)
+		}
+		if permitData.Signature == "" {
+			return fmt.Errorf("permit signature is missing - please sign the permit")
+		}
+		now := big.NewInt(time.Now().Unix())
+		if permitData.SigDeadline.Cmp(now) <= 0 {
+			return fmt.Errorf("permit has expired - please request a new permit")
+		}
+	}
+
+	return fmt.Errorf("no permit found - please sign permit before voting")
+}
+
+// GetOrCreatePlayerPermit gets existing permit or creates a new one if needed
+func (m *Manager) GetOrCreatePlayerPermit(walletAddress string, chainID uint32) (*client.PermitSignatureData, interface{}, error) {
+	// Check if we already have a valid permit
+	if m.HasValidPermit(walletAddress, chainID) {
+		permitData := m.GetPlayerPermit(walletAddress)
+		return permitData, nil, nil
+	}
+
+	// Create new permit
+	return m.CreatePermitForPlayer(walletAddress, chainID)
+}
+
 // GetOrCreateGame gets an existing game or creates a new one
 func (m *Manager) GetOrCreateGame() *GameState {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	var gameResult *GameCreationResult
-
-	// Create game on blockchain if service is available
-	if m.blockchainService != nil && m.blockchainService.IsConnected() {
-		gameResult, err := m.createGameOnBlockchain(StakeAmount)
-		if err != nil {
-			log.Printf("Error creating game on blockchain: %v", err)
-		} else {
-			log.Printf("Game %s created on-chain! Transaction: %s", gameResult.GameID.String(), gameResult.TransactionHash.Hex())
-		}
-	}
+	// Generate a unique game ID
+	gameID := uuid.New().String()
 
 	game := &GameState{
-		ID:                   gameResult.GameID.String(),
+		ID:                   gameID,
 		Votes:                make(map[string]int),
 		TimeLeft:             GameTimerSeconds, // Use constant for timer duration
 		Game:                 chess.NewGame(),
@@ -161,6 +290,21 @@ func (m *Manager) GetOrCreateGame() *GameState {
 		BlackTeamTotalVotes:  0,
 		PlayerVotedThisRound: make(map[string]bool),
 		PlayerTotalVotes:     make(map[string]int),
+	}
+
+	// Create blockchain game if GameFactory is available
+	if m.gameFactory != nil {
+		// Use fixed stake amount of 0.01 USDC (converted to wei: 0.01 * 10^6)
+		stakeAmount := new(big.Int).SetInt64(10000) // 0.01 USDC in USDC's 6 decimal places
+		blockchainGameID, err := m.gameFactory.CreateGame(stakeAmount)
+		if err != nil {
+			log.Fatalf("Failed to create game contract: %v", err)
+		} else {
+			game.BlockchainGameID = blockchainGameID
+			log.Printf("Created game contract with ID: %d for local game: %s", blockchainGameID, gameID)
+		}
+	} else {
+		log.Fatal("No game factory available")
 	}
 
 	m.games[game.ID] = game
@@ -181,17 +325,6 @@ func (m *Manager) GetGame(gameID string) *GameState {
 	}
 
 	return nil
-}
-
-// createGameOnBlockchain creates a game on the blockchain asynchronously
-func (m *Manager) createGameOnBlockchain(stakeAmount float64) (*GameCreationResult, error) {
-	stakeAmountBigInt := big.NewInt(int64(stakeAmount * 1e6))
-	if gameResult, err := m.blockchainService.CreateGame(stakeAmountBigInt); err != nil {
-		log.Printf("Error creating game on blockchain: %v", err)
-		return nil, err
-	} else {
-		return gameResult, nil
-	}
 }
 
 // runGameTimer manages the game timer and move execution
@@ -299,6 +432,7 @@ func (m *Manager) handleGameEnd(gameID string, gameStats map[string]any) {
 	game.mu.RLock()
 	outcome := game.Game.Outcome()
 	method := game.Game.Method()
+	blockchainGameID := game.BlockchainGameID
 	game.mu.RUnlock()
 
 	if outcome == chess.NoOutcome {
@@ -339,13 +473,24 @@ func (m *Manager) handleGameEnd(gameID string, gameStats map[string]any) {
 		}
 	}
 
-	// Process game end using the EndGameProcessor
-	if m.endGameProcessor != nil {
-		go func() {
-			if err := m.endGameProcessor.ProcessGameEnd(gameID, winner, game); err != nil {
-				log.Printf("Error processing game end for %s: %v", gameID, err)
+	// Distribute rewards to winners before ending the game
+	if m.vaultManager != nil && blockchainGameID != 0 {
+		m.distributeRewards(gameID, winner, gameStats)
+	}
+
+	// End the blockchain game if available
+	if m.gameFactory != nil && blockchainGameID != 0 {
+		result, err := client.ResultStringToUint8(winner)
+		if err != nil {
+			log.Printf("Warning: Failed to convert result '%s' to uint8: %v", winner, err)
+		} else {
+			err = m.gameFactory.EndGame(blockchainGameID, result)
+			if err != nil {
+				log.Printf("Warning: Failed to end blockchain game %d: %v", blockchainGameID, err)
+			} else {
+				log.Printf("Successfully ended blockchain game %d with result: %s", blockchainGameID, winner)
 			}
-		}()
+		}
 	}
 
 	// Broadcast game end
@@ -374,7 +519,7 @@ func (m *Manager) getBestMove(game *GameState) string {
 }
 
 // VoteForMove allows a player to vote for a move
-func (m *Manager) VoteForMove(gameID, walletAddress, move string, team string) error {
+func (m *Manager) VoteForMove(gameID, walletAddress, move string, team string, chainId uint32) error {
 	m.mu.RLock()
 	game, exists := m.games[gameID]
 	m.mu.RUnlock()
@@ -415,7 +560,54 @@ func (m *Manager) VoteForMove(gameID, walletAddress, move string, team string) e
 		return fmt.Errorf("invalid move: %s", move)
 	}
 
-	// Record vote
+	// MANDATORY: Ensure player has valid permit before allowing vote
+	if chainId != 0 {
+		err := m.EnsurePlayerPermit(walletAddress, chainId)
+		if err != nil {
+			return fmt.Errorf("permit required for voting: %w", err)
+		}
+	}
+
+	// Stake USDC to vault contract on player's chain using stored permit
+	if m.vaultManager != nil && chainId != 0 {
+		vault, err := m.vaultManager.GetVault(uint64(chainId))
+		if err != nil {
+			log.Printf("Warning: Failed to get vault for chain %d: %v", chainId, err)
+		} else {
+			playerAddress := common.HexToAddress(walletAddress)
+			stakeAmount := new(big.Int).SetInt64(10000) // 0.01 USDC in USDC's 6 decimal places
+
+			// Get the stored permit (we already validated it exists above)
+			permitData := m.GetPlayerPermit(walletAddress)
+			log.Printf("Using stored permit for player %s on chain %d", walletAddress, chainId)
+			err = vault.StakeWithPermit(playerAddress, game.BlockchainGameID, stakeAmount, permitData)
+			if err != nil {
+				log.Printf("Error: Failed to stake with permit to vault on chain %d: %v", chainId, err)
+				return fmt.Errorf("staking with permit failed: %w", err)
+			} else {
+				log.Printf("Successfully staked 0.01 USDC for player %s on chain %d using Permit2", walletAddress, chainId)
+			}
+		}
+	}
+
+	// Add vote to blockchain if available
+	if m.gameFactory != nil && game.BlockchainGameID != 0 {
+		teamUint8, err := client.TeamStringToUint8(team)
+		if err != nil {
+			log.Printf("Warning: Failed to convert team '%s' to uint8: %v", team, err)
+		} else {
+			playerAddress := common.HexToAddress(walletAddress)
+			err = m.gameFactory.AddVote(game.BlockchainGameID, playerAddress, chainId, teamUint8)
+			if err != nil {
+				log.Printf("Warning: Failed to add vote to blockchain: %v", err)
+				// Continue with local vote even if blockchain fails
+			} else {
+				log.Printf("Successfully added vote to blockchain for player %s", walletAddress)
+			}
+		}
+	}
+
+	// Record vote locally
 	if _, exists := game.Votes[move]; !exists {
 		game.Votes[move] = 0
 	}
@@ -435,30 +627,6 @@ func (m *Manager) VoteForMove(gameID, walletAddress, move string, team string) e
 		game.BlackTeamTotalVotes++
 		game.BlackPot += 0.01
 		game.TotalPot += 0.01
-	}
-
-	// Record move on blockchain if available
-	if m.blockchainService != nil && m.blockchainService.IsConnected() {
-		go func() {
-			player := common.HexToAddress(walletAddress)
-
-			// Record the move
-			var teamCode uint8 = 0 // 0 for white, 1 for black
-			if team == "black" {
-				teamCode = 1
-			}
-			if err := m.blockchainService.RecordMove(gameID, player, teamCode); err != nil {
-				log.Printf("Error recording move on blockchain: %v", err)
-			}
-
-			// Stake USDC from player's approved allowance
-			stakeAmount := big.NewInt(10000) // 0.01 USDC (6 decimals)
-			if err := m.blockchainService.StakeOnVote(gameID, player, stakeAmount); err != nil {
-				log.Printf("Error staking USDC from player %s: %v", walletAddress, err)
-			} else {
-				log.Printf("Successfully staked %s USDC from player %s in game %s", stakeAmount.String(), walletAddress, gameID)
-			}
-		}()
 	}
 
 	log.Printf("Player %s voted for move %s in team %s (game %s)", walletAddress, move, team, gameID)
@@ -944,76 +1112,275 @@ func (m *Manager) GetAllGames() []string {
 	return gameIDs
 }
 
-// GetBlockchainService returns the blockchain service (for testing)
-func (m *Manager) GetBlockchainService() BlockchainService {
-	return m.blockchainService
+// distributeRewards distributes rewards to winning players using multicall approach
+func (m *Manager) distributeRewards(gameID, winner string, gameStats map[string]any) {
+	if winner == "draw" {
+		log.Printf("Game %s ended in draw, no rewards to distribute", gameID)
+		return
+	}
+
+	// Step 1: Gather all rewards from participating vaults to Base Sepolia
+	err := m.gatherRewards(gameID, gameStats)
+	if err != nil {
+		log.Printf("Warning: Failed to gather rewards for game %s: %v", gameID, err)
+		return
+	}
+
+	// Step 2: Calculate and distribute rewards from total pot
+	m.distributeRewardsFromTotalPot(gameID, winner, gameStats)
 }
 
-// SetBlockchainService sets the blockchain service (for testing)
-func (m *Manager) SetBlockchainService(service BlockchainService) {
-	m.blockchainService = service
+// gatherRewards sends all vault rewards to the central Base Sepolia vault
+func (m *Manager) gatherRewards(gameID string, gameStats map[string]any) error {
+	// Get all players from both teams to determine which chains were involved
+	var allPlayers []map[string]any
+
+	if whiteTeamPlayers, ok := gameStats["whiteTeamPlayers"].([]map[string]any); ok {
+		allPlayers = append(allPlayers, whiteTeamPlayers...)
+	}
+	if blackTeamPlayers, ok := gameStats["blackTeamPlayers"].([]map[string]any); ok {
+		allPlayers = append(allPlayers, blackTeamPlayers...)
+	}
+
+	if len(allPlayers) == 0 {
+		return fmt.Errorf("no players found in game stats")
+	}
+
+	// Get unique chain IDs from all players
+	involvedChains := make(map[uint64]bool)
+	for _, player := range allPlayers {
+		if walletAddress, ok := player["walletAddress"].(string); ok {
+			playerChainID := m.GetPlayerChainID(walletAddress)
+			if playerChainID != 0 {
+				involvedChains[uint64(playerChainID)] = true
+			}
+		}
+	}
+
+	// Base Sepolia chain ID (destination for all rewards)
+	baseSepoliaChainID := uint64(84532)
+
+	// Remove Base Sepolia from involved chains since we're gathering TO it
+	delete(involvedChains, baseSepoliaChainID)
+
+	if len(involvedChains) == 0 {
+		log.Printf("No external chains involved in game %s, all rewards already on Base Sepolia", gameID)
+		return nil
+	}
+
+	// Get blockchain game ID
+	m.mu.RLock()
+	game, exists := m.games[gameID]
+	gameIDUint := uint64(0)
+	if exists {
+		gameIDUint = game.BlockchainGameID
+	}
+	m.mu.RUnlock()
+
+	if !exists {
+		return fmt.Errorf("game %s not found", gameID)
+	}
+
+	// Get total pot to transfer
+	totalPot := 0.0
+	if tp, ok := gameStats["totalPot"].(float64); ok {
+		totalPot = tp
+	}
+
+	if totalPot <= 0 {
+		return fmt.Errorf("no pot to gather for game %s", gameID)
+	}
+
+	// Calculate amount per chain (distribute the gathering equally)
+	totalPotWei := new(big.Int).SetInt64(int64(totalPot * 1000000)) // Convert to USDC wei
+	amountPerChain := new(big.Int).Div(totalPotWei, big.NewInt(int64(len(involvedChains))))
+
+	log.Printf("Gathering %s USDC total pot from %d chains to Base Sepolia (%s per chain)",
+		totalPotWei.String(), len(involvedChains), amountPerChain.String())
+
+	// Get Base Sepolia vault address as recipient
+	baseVaultAddress := client.GetVaultAddress(baseSepoliaChainID)
+	if baseVaultAddress == "" {
+		return fmt.Errorf("no Base Sepolia vault address configured")
+	}
+	recipient := common.HexToAddress(baseVaultAddress)
+
+	// Transfer from each involved chain to Base Sepolia
+	for chainID := range involvedChains {
+		vault, err := m.vaultManager.GetVault(chainID)
+		if err != nil {
+			log.Printf("Warning: Failed to get vault for chain %d: %v", chainID, err)
+			continue
+		}
+
+		// Transfer rewards to Base Sepolia vault
+		useFastTransfer := false // Use standard transfer for lower fees
+		maxFee := big.NewInt(0)  // Let the contract determine the fee
+
+		err = vault.TransferRewards(gameIDUint, amountPerChain, baseSepoliaChainID, recipient, useFastTransfer, maxFee)
+		if err != nil {
+			log.Printf("Warning: Failed to gather rewards from chain %d: %v", chainID, err)
+			continue
+		}
+
+		log.Printf("Successfully gathered %s USDC from chain %d to Base Sepolia vault",
+			amountPerChain.String(), chainID)
+	}
+
+	return nil
 }
 
-// GeneratePermit2SignatureData generates Permit2 typed data for signing
-func (m *Manager) GeneratePermit2SignatureData(walletAddress string) (interface{}, error) {
-	if m.blockchainService == nil {
-		return nil, fmt.Errorf("blockchain service not available")
+// distributeRewardsFromTotalPot distributes rewards from the total pot using multicall
+func (m *Manager) distributeRewardsFromTotalPot(gameID, winner string, gameStats map[string]any) {
+	// Get the winning team players
+	var winningPlayers []map[string]any
+
+	switch winner {
+	case "white":
+		if whiteTeamPlayers, ok := gameStats["whiteTeamPlayers"].([]map[string]any); ok {
+			winningPlayers = whiteTeamPlayers
+		}
+	case "black":
+		if blackTeamPlayers, ok := gameStats["blackTeamPlayers"].([]map[string]any); ok {
+			winningPlayers = blackTeamPlayers
+		}
 	}
 
-	playerAddr := common.HexToAddress(walletAddress)
-
-	// Cast to EthereumBlockchainService to access Permit2 method
-	ethService, ok := m.blockchainService.(*EthereumBlockchainService)
-	if !ok {
-		return nil, fmt.Errorf("blockchain service does not support Permit2")
+	if len(winningPlayers) == 0 {
+		log.Printf("No winning players for game %s", gameID)
+		return
 	}
 
-	return ethService.GeneratePermit2SignatureData(playerAddr)
+	// Get total pot (not just losing team pot)
+	totalPot := 0.0
+	if tp, ok := gameStats["totalPot"].(float64); ok {
+		totalPot = tp
+	}
+
+	if totalPot <= 0 {
+		log.Printf("No total pot for game %s", gameID)
+		return
+	}
+
+	// Calculate total votes from winning team
+	totalWinningVotes := 0
+	for _, player := range winningPlayers {
+		if votes, ok := player["totalVotes"].(int); ok {
+			totalWinningVotes += votes
+		}
+	}
+
+	if totalWinningVotes == 0 {
+		log.Printf("No votes from winning team for game %s", gameID)
+		return
+	}
+
+	// Convert total pot to USDC wei (6 decimal places)
+	totalPotWei := new(big.Int).SetInt64(int64(totalPot * 1000000)) // Convert to USDC wei
+
+	log.Printf("Distributing %s USDC from total pot to %d winning players based on %d total votes",
+		totalPotWei.String(), len(winningPlayers), totalWinningVotes)
+
+	// Prepare multicall data for all reward transfers
+	var rewardTransfers []RewardTransfer
+
+	// Calculate each player's share
+	for _, player := range winningPlayers {
+		walletAddress, ok := player["walletAddress"].(string)
+		if !ok {
+			continue
+		}
+
+		playerVotes, ok := player["totalVotes"].(int)
+		if !ok || playerVotes <= 0 {
+			continue
+		}
+
+		// Calculate player's proportional share of the total pot
+		playerShare := new(big.Int).Mul(totalPotWei, big.NewInt(int64(playerVotes)))
+		playerShare.Div(playerShare, big.NewInt(int64(totalWinningVotes)))
+
+		if playerShare.Cmp(big.NewInt(0)) <= 0 {
+			continue
+		}
+
+		// Get player's chain ID for destination
+		playerChainID := m.GetPlayerChainID(walletAddress)
+		if playerChainID == 0 {
+			log.Printf("Warning: No chain ID found for player %s, skipping reward", walletAddress)
+			continue
+		}
+
+		rewardTransfers = append(rewardTransfers, RewardTransfer{
+			Recipient:        common.HexToAddress(walletAddress),
+			Amount:           playerShare,
+			DestinationChain: uint64(playerChainID),
+		})
+
+		log.Printf("Prepared reward transfer: %s USDC to %s on chain %d",
+			playerShare.String(), walletAddress, playerChainID)
+	}
+
+	if len(rewardTransfers) == 0 {
+		log.Printf("No valid reward transfers for game %s", gameID)
+		return
+	}
+
+	// Execute multicall reward distribution
+	err := m.executeMulticallRewards(gameID, rewardTransfers)
+	if err != nil {
+		log.Printf("Warning: Failed to execute multicall rewards for game %s: %v", gameID, err)
+	}
 }
 
-// StorePermit2Signature stores a signed Permit2 signature for a player
-func (m *Manager) StorePermit2Signature(walletAddress, signature string) error {
-	if m.blockchainService == nil {
-		return fmt.Errorf("blockchain service not available")
-	}
-
-	playerAddr := common.HexToAddress(walletAddress)
-
-	// Cast to EthereumBlockchainService to access Permit2 method
-	ethService, ok := m.blockchainService.(*EthereumBlockchainService)
-	if !ok {
-		return fmt.Errorf("blockchain service does not support Permit2")
-	}
-
-	return ethService.StorePermit2Signature(playerAddr, signature)
+// RewardTransfer represents a single reward transfer
+type RewardTransfer struct {
+	Recipient        common.Address
+	Amount           *big.Int
+	DestinationChain uint64
 }
 
-// ExecutePermit2 executes a Permit2 allowance using the stored signature
-func (m *Manager) ExecutePermit2(walletAddress string) error {
-	if m.blockchainService == nil {
-		return fmt.Errorf("blockchain service not available")
+// executeMulticallRewards executes multiple reward transfers using multicall
+func (m *Manager) executeMulticallRewards(gameID string, transfers []RewardTransfer) error {
+	// Get Base Sepolia vault (where all rewards are now gathered)
+	baseSepoliaChainID := uint64(84532)
+	baseVault, err := m.vaultManager.GetVault(baseSepoliaChainID)
+	if err != nil {
+		return fmt.Errorf("failed to get Base Sepolia vault: %w", err)
 	}
 
-	playerAddr := common.HexToAddress(walletAddress)
+	// Get blockchain game ID
+	m.mu.RLock()
+	game, exists := m.games[gameID]
+	gameIDUint := uint64(0)
+	if exists {
+		gameIDUint = game.BlockchainGameID
+	}
+	m.mu.RUnlock()
 
-	// Cast to EthereumBlockchainService to access Permit2 method
-	ethService, ok := m.blockchainService.(*EthereumBlockchainService)
-	if !ok {
-		return fmt.Errorf("blockchain service does not support Permit2")
+	if !exists {
+		return fmt.Errorf("game %s not found", gameID)
 	}
 
-	return ethService.ExecutePermit2(playerAddr)
-}
+	log.Printf("Executing multicall reward distribution for %d transfers", len(transfers))
 
-// GetClients returns the blockchain clients for multi-chain operations
-func (m *Manager) GetClients() *Clients {
-	return m.clients
-}
+	for i, transfer := range transfers {
+		log.Printf("Executing transfer %d/%d: %s USDC to %s on chain %d",
+			i+1, len(transfers), transfer.Amount.String(), transfer.Recipient.Hex(), transfer.DestinationChain)
 
-// GetClientForChain returns a specific blockchain client by chain ID
-func (m *Manager) GetClientForChain(chainID uint64) (*ethclient.Client, error) {
-	if m.clients == nil {
-		return nil, fmt.Errorf("blockchain clients not initialized")
+		useFastTransfer := false // Use standard transfer for lower fees
+		maxFee := big.NewInt(0)  // Let the contract determine the fee
+
+		err := baseVault.TransferRewards(gameIDUint, transfer.Amount, transfer.DestinationChain, transfer.Recipient, useFastTransfer, maxFee)
+		if err != nil {
+			log.Printf("Warning: Failed to transfer reward %d: %v", i+1, err)
+			continue
+		}
+
+		log.Printf("Successfully transferred reward %d: %s USDC to %s on chain %d",
+			i+1, transfer.Amount.String(), transfer.Recipient.Hex(), transfer.DestinationChain)
 	}
-	return m.clients.GetClientByChainID(chainID)
+
+	log.Printf("Completed multicall reward distribution for game %s", gameID)
+	return nil
 }

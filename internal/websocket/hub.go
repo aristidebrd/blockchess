@@ -32,9 +32,8 @@ const (
 	TypeGetValidMoves            = "get_valid_moves"
 	TypeValidMovesResponse       = "valid_moves_response"
 	TypeError                    = "error"
-	TypeRequestPermit2           = "request_permit2"
-	TypePermit2Data              = "permit2_data"
-	TypeSubmitPermit2Signature   = "submit_permit2_signature"
+	TypePermitSignature          = "permit_signature"
+	TypeRequestPermitSignature   = "request_permit_signature"
 )
 
 // GameInfo holds summary information about a single game
@@ -326,8 +325,14 @@ func (h *Hub) handleMessage(msg *Message, client *Client) {
 			return
 		}
 
+		// Get the player's chain ID (use from message if provided, otherwise use stored value)
+		chainID := msg.ChainId
+		if chainID == 0 {
+			chainID = h.gameManager.GetPlayerChainID(walletAddress)
+		}
+
 		// Attempt to vote
-		if err := h.gameManager.VoteForMove(msg.GameID, walletAddress, msg.Move, team); err != nil {
+		if err := h.gameManager.VoteForMove(msg.GameID, walletAddress, msg.Move, team, chainID); err != nil {
 			log.Printf("Vote failed for player %s: %v", walletAddress, err)
 			h.sendErrorToClient(client, err.Error())
 			return
@@ -362,7 +367,12 @@ func (h *Hub) handleMessage(msg *Message, client *Client) {
 		// Store the wallet address mapping for this client
 		h.clientWallets[client] = walletAddress
 
-		log.Printf("Player %s (wallet: %s) joining matchmaking", client.id, walletAddress)
+		// Set the player's chain ID in the game manager if provided
+		if msg.ChainId != 0 {
+			h.gameManager.SetPlayerChainID(walletAddress, msg.ChainId)
+		}
+
+		log.Printf("Player %s (wallet: %s) joining matchmaking on chain %d", client.id, walletAddress, msg.ChainId)
 		h.addToMatchmaking(client, walletAddress)
 
 	case TypeLeaveMatchmaking:
@@ -558,59 +568,125 @@ func (h *Hub) handleMessage(msg *Message, client *Client) {
 			}
 		}
 
-	case TypeRequestPermit2:
+	case TypeRequestPermitSignature:
 		walletAddress := msg.WalletAddress
+		chainID := msg.ChainId
+
 		if walletAddress == "" {
-			log.Printf("No wallet address provided for permit2 request from client %s", client.id)
-			h.sendErrorToClient(client, "Wallet address is required for permit2 request")
+			log.Printf("No wallet address provided for permit signature request from client %s", client.id)
+			h.sendErrorToClient(client, "Wallet address is required for permit signature")
+			return
+		}
+
+		if chainID == 0 {
+			log.Printf("No chain ID provided for permit signature request from client %s", client.id)
+			h.sendErrorToClient(client, "Chain ID is required for permit signature")
 			return
 		}
 
 		// Store the wallet address mapping for this client
 		h.clientWallets[client] = walletAddress
 
-		permit2Data, err := h.gameManager.GeneratePermit2SignatureData(walletAddress)
+		log.Printf("Creating permit signature request for wallet %s on chain %d", walletAddress, chainID)
+
+		// Get or create permit signature data using manager's function
+		permitData, typedData, err := h.gameManager.GetOrCreatePlayerPermit(walletAddress, chainID)
 		if err != nil {
-			log.Printf("Failed to generate permit2 data for wallet %s: %v", walletAddress, err)
-			h.sendErrorToClient(client, "Failed to generate permit2 data")
+			log.Printf("Failed to get/create permit for player %s: %v", walletAddress, err)
+			h.sendErrorToClient(client, fmt.Sprintf("Failed to create permit: %v", err))
 			return
 		}
 
-		h.sendPermit2DataToClient(client, permit2Data)
+		// If we got existing permit data (typedData will be nil), just confirm it's valid
+		if typedData == nil {
+			log.Printf("Player %s already has valid permit for chain %d", walletAddress, chainID)
+			// Send confirmation that permit is already valid
+			confirmMsg := &Message{
+				Type:          "permit_valid",
+				WalletAddress: walletAddress,
+				ChainId:       chainID,
+			}
+			if data, err := json.Marshal(confirmMsg); err == nil {
+				select {
+				case client.send <- data:
+					log.Printf("Sent permit confirmation to client %s", client.id)
+				default:
+					log.Printf("Failed to send permit confirmation to client %s - channel full", client.id)
+				}
+			}
+			return
+		}
 
-	case TypeSubmitPermit2Signature:
+		// Store the permit data in the game manager for later signature completion
+		h.gameManager.StorePlayerPermit(walletAddress, permitData)
+
+		// Send permit signature request to client
+		permitMsg := &Message{
+			Type:          TypePermitSignature,
+			WalletAddress: walletAddress,
+			ChainId:       chainID,
+			TypedData:     typedData,
+		}
+
+		if data, err := json.Marshal(permitMsg); err == nil {
+			select {
+			case client.send <- data:
+				log.Printf("Sent permit signature request to client %s", client.id)
+			default:
+				log.Printf("Failed to send permit signature request to client %s - channel full", client.id)
+			}
+		} else {
+			log.Printf("Failed to marshal permit signature request: %v", err)
+		}
+
+	case TypePermitSignature:
 		walletAddress := msg.WalletAddress
 		signature := msg.Signature
+		chainID := msg.ChainId
 
 		if walletAddress == "" {
-			log.Printf("No wallet address provided for permit2 signature from client %s", client.id)
-			h.sendErrorToClient(client, "Wallet address is required for permit2 signature")
+			log.Printf("No wallet address provided for permit signature from client %s", client.id)
+			h.sendErrorToClient(client, "Wallet address is required")
 			return
 		}
 
 		if signature == "" {
-			log.Printf("No signature provided for permit2 signature from client %s", client.id)
-			h.sendErrorToClient(client, "Signature is required for permit2 signature")
+			log.Printf("No signature provided for permit from client %s", client.id)
+			h.sendErrorToClient(client, "Signature is required")
 			return
 		}
 
-		// Store the permit2 signature
-		err := h.gameManager.StorePermit2Signature(walletAddress, signature)
-		if err != nil {
-			log.Printf("Failed to store permit2 signature for wallet %s: %v", walletAddress, err)
-			h.sendErrorToClient(client, "Failed to store permit2 signature")
+		if chainID == 0 {
+			log.Printf("No chain ID provided for permit signature from client %s", client.id)
+			h.sendErrorToClient(client, "Chain ID is required")
 			return
 		}
 
-		// Execute the permit2 allowance
-		err = h.gameManager.ExecutePermit2(walletAddress)
-		if err != nil {
-			log.Printf("Failed to execute permit2 for wallet %s: %v", walletAddress, err)
-			h.sendErrorToClient(client, "Failed to execute permit2")
+		// Store the wallet address mapping for this client
+		h.clientWallets[client] = walletAddress
+
+		log.Printf("Received permit signature from wallet %s on chain %d", walletAddress, chainID)
+
+		// Get the existing permit data for this player
+		permitData := h.gameManager.GetPlayerPermit(walletAddress)
+		if permitData == nil {
+			log.Printf("No permit data found for player %s", walletAddress)
+			h.sendErrorToClient(client, "No permit data found. Please request a new permit.")
 			return
 		}
 
-		log.Printf("Successfully executed permit2 for wallet %s", walletAddress)
+		// Verify the chain ID matches
+		if permitData.ChainID != uint64(chainID) {
+			log.Printf("Chain ID mismatch for player %s: expected %d, got %d", walletAddress, permitData.ChainID, chainID)
+			h.sendErrorToClient(client, "Chain ID mismatch")
+			return
+		}
+
+		// Store the signature
+		permitData.Signature = signature
+		h.gameManager.StorePlayerPermit(walletAddress, permitData)
+
+		log.Printf("Successfully stored permit signature for player %s on chain %d", walletAddress, chainID)
 	}
 }
 
@@ -1165,26 +1241,5 @@ func (h *Hub) sendErrorToClient(client *Client, errorMsg string) {
 		}
 	} else {
 		log.Printf("Failed to marshal error message for client %s: %v", client.id, err)
-	}
-}
-
-// sendPermit2DataToClient sends Permit2 typed data to a specific client
-func (h *Hub) sendPermit2DataToClient(client *Client, permit2Data interface{}) {
-	data, err := json.Marshal(map[string]interface{}{
-		"type":        TypePermit2Data,
-		"permit2Data": permit2Data,
-	})
-
-	if err != nil {
-		log.Printf("Failed to marshal permit2 data for client %s: %v", client.id, err)
-		h.sendErrorToClient(client, "Failed to generate permit2 data")
-		return
-	}
-
-	select {
-	case client.send <- data:
-		log.Printf("Successfully sent permit2 data to client %s", client.id)
-	default:
-		log.Printf("Failed to send permit2 data to client %s: channel full", client.id)
 	}
 }

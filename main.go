@@ -10,6 +10,7 @@ import (
 	"strings"
 	"syscall"
 
+	"blockchess/internal/client"
 	"blockchess/internal/game"
 	"blockchess/internal/websocket"
 
@@ -22,7 +23,7 @@ func main() {
 
 	// Initialize blockchain clients
 	log.Println("Initializing blockchain clients...")
-	clients, err := game.InitializeClients()
+	clients, err := client.InitializeClients()
 	if err != nil {
 		log.Printf("Warning: Failed to initialize some blockchain clients: %v", err)
 	}
@@ -40,7 +41,7 @@ func main() {
 	}()
 
 	// Create game manager with blockchain clients
-	gameManager := game.NewManagerWithClients(clients)
+	gameManager := game.NewGamesManager(clients)
 
 	// Create WebSocket hub
 	hub := websocket.NewHub(gameManager)

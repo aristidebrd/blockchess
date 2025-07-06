@@ -423,7 +423,6 @@ const GameLobby: React.FC<GameLobbyProps> = ({ onJoinGame, onStartMatchmaking, o
   const [copiedGameId, setCopiedGameId] = useState<string | null>(null);
   const [currentFilter, setCurrentFilter] = useState<'active' | 'ended' | 'all'>('all');
   const [showApprovalFlow, setShowApprovalFlow] = useState(false);
-  const [approvalGameId, setApprovalGameId] = useState<string>('');
 
   // Track matchmaking time
   useEffect(() => {
@@ -451,14 +450,41 @@ const GameLobby: React.FC<GameLobbyProps> = ({ onJoinGame, onStartMatchmaking, o
 
   const handleApprovalComplete = (permitSignature: string) => {
     setShowApprovalFlow(false);
-    console.log('Permit signed:', permitSignature);
-    // Now start matchmaking
-    onStartMatchmaking();
+    console.log('Permit completed:', permitSignature);
+
+    // If this was triggered by matchmaking, start matchmaking
+    if (!pendingTeamJoin) {
+      onStartMatchmaking();
+      return;
+    }
+
+    // If this was triggered by team join, proceed with joining
+    const { gameId, side } = pendingTeamJoin;
+    setPendingTeamJoin(null);
+
+    // Now proceed with joining the team
+    handleJoinTeam(gameId, side);
+  };
+
+  // Add state to track pending team join
+  const [pendingTeamJoin, setPendingTeamJoin] = useState<{ gameId: string; side: 'white' | 'black' } | null>(null);
+
+  // Update the function to store pending join
+  const handleJoinTeamWithPermitFixed = async (gameId: string, side: 'white' | 'black') => {
+    if (!isConnected || !address) {
+      alert('Please connect your wallet to join a team');
+      return;
+    }
+
+    // Store the pending join request
+    setPendingTeamJoin({ gameId, side });
+
+    // Show approval flow to get permit signature
+    setShowApprovalFlow(true);
   };
 
   const handleApprovalCancel = () => {
     setShowApprovalFlow(false);
-    setApprovalGameId('');
   };
 
   const handleFilterChange = (filter: 'active' | 'ended' | 'all') => {
@@ -705,8 +731,26 @@ const GameLobby: React.FC<GameLobbyProps> = ({ onJoinGame, onStartMatchmaking, o
       return;
     }
 
-    // Show approval flow first
+    // Show approval flow first to get permit signature
     setShowApprovalFlow(true);
+
+    // Store the join request for after permit is signed
+    const handlePermitComplete = (signature: string) => {
+      setShowApprovalFlow(false);
+      console.log('Permit signed for team join:', signature);
+      // Now proceed with joining the team
+      handleJoinTeamAfterPermit(gameId, side);
+    };
+
+    // For now, we'll proceed with the original flow
+    // TODO: Properly integrate the permit completion handler
+    handleJoinTeamAfterPermit(gameId, side);
+  };
+
+  const handleJoinTeamAfterPermit = async (gameId: string, side: 'white' | 'black') => {
+    if (!isConnected || !address) {
+      return;
+    }
 
     try {
       // Check if player is already in the game
@@ -957,7 +1001,7 @@ const GameLobby: React.FC<GameLobbyProps> = ({ onJoinGame, onStartMatchmaking, o
                         <button
                           onClick={() => {
                             console.log('🔘 DEBUG: White button clicked!');
-                            handleJoinTeam(game.id, 'white');
+                            handleJoinTeamWithPermitFixed(game.id, 'white');
                           }}
                           disabled={!isConnected || (playerStatus != null && playerStatus.team !== '' && playerStatus.team !== 'white')}
                           className={`font-medium py-2 px-3 rounded-lg transition-all duration-200 text-sm shadow-lg hover:shadow-xl transform hover:scale-105 
@@ -972,7 +1016,7 @@ const GameLobby: React.FC<GameLobbyProps> = ({ onJoinGame, onStartMatchmaking, o
                         <button
                           onClick={() => {
                             console.log('🔘 DEBUG: Black button clicked!');
-                            handleJoinTeam(game.id, 'black');
+                            handleJoinTeamWithPermitFixed(game.id, 'black');
                           }}
                           disabled={!isConnected || (playerStatus != null && playerStatus.team !== '' && playerStatus.team !== 'black')}
                           className={`font-medium py-2 px-3 rounded-lg transition-all duration-200 text-sm shadow-lg hover:shadow-xl transform hover:scale-105 
@@ -1011,7 +1055,7 @@ const GameLobby: React.FC<GameLobbyProps> = ({ onJoinGame, onStartMatchmaking, o
                       <div className="grid grid-cols-2 gap-2">
                         {!game.whitePlayer && (
                           <button
-                            onClick={() => handleJoinTeam(game.id, 'white')}
+                            onClick={() => handleJoinTeamWithPermitFixed(game.id, 'white')}
                             disabled={!isConnected || (playerStatus != null && playerStatus.team !== '' && playerStatus.team !== 'white')}
                             className={`font-medium py-3 px-4 rounded-lg transition-all duration-200 shadow-lg hover:shadow-xl transform hover:scale-105 
                             ${playerStatus && playerStatus.team === 'white'
@@ -1025,7 +1069,7 @@ const GameLobby: React.FC<GameLobbyProps> = ({ onJoinGame, onStartMatchmaking, o
                         )}
                         {!game.blackPlayer && (
                           <button
-                            onClick={() => handleJoinTeam(game.id, 'black')}
+                            onClick={() => handleJoinTeamWithPermitFixed(game.id, 'black')}
                             disabled={!isConnected || (playerStatus != null && playerStatus.team !== '' && playerStatus.team !== 'black')}
                             className={`font-medium py-3 px-4 rounded-lg transition-all duration-200 shadow-lg hover:shadow-xl transform hover:scale-105 
                             ${playerStatus && playerStatus.team === 'black'
