@@ -6,6 +6,9 @@
   "scripts": {
     "anvil:base": "anvil --fork-url https://base-sepolia.g.alchemy.com/v2/Kv5V9_Sv55ZosXpoVga3IfXYO6JV9gNJ --block-time 2 --port 8545",
     "anvil:optimism": "anvil --fork-url https://opt-sepolia.g.alchemy.com/v2/Kv5V9_Sv55ZosXpoVga3IfXYO6JV9gNJ --block-time 2 --port 8546",
+    "anvil:ethereum": "anvil --fork-url https://eth-sepolia.g.alchemy.com/v2/Kv5V9_Sv55ZosXpoVga3IfXYO6JV9gNJ --block-time 2 --port 8547",
+    "anvil:avalanche": "anvil --fork-url https://api.avax-test.network/ext/bc/C/rpc --block-time 2 --port 8548",
+    "anvil:arbitrum": "anvil --fork-url https://arb-sepolia.g.alchemy.com/v2/Kv5V9_Sv55ZosXpoVga3IfXYO6JV9gNJ --block-time 2 --port 8549",
     "anvil:debug": "anvil --fork-url https://base-sepolia.g.alchemy.com/v2/Kv5V9_Sv55ZosXpoVga3IfXYO6JV9gNJ --block-time 5 --enable-trace-printing --gas-limit 30000000",
     "dev": "vite",
     "build": "vite build",
