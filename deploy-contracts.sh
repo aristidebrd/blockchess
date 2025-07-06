@@ -36,6 +36,7 @@ echo "RPC URL: $RPC_URL"
 # Deploy contracts
 echo "📦 Deploying contracts..."
 forge script contracts/script/DeployVaultSystem.s.sol --rpc-url $RPC_URL --private-key $PRIVATE_KEY --broadcast
+forge script contracts/script/DeployVaultMultiChain.s.sol:DeployVaultMultiChain --rpc-url $RPC_URL --broadcast
 
 if [ $? -eq 0 ]; then
     echo "✅ Contracts deployed successfully!"

@@ -2,72 +2,66 @@
 pragma solidity ^0.8.30;
 
 interface IVaultContract {
-    // Enums
-    enum GameResult {
-        Ongoing,
-        WhiteWins,
-        BlackWins,
-        Draw
-    }
-
     // Structs
     struct GameVaultInfo {
-        uint256 gameId;
         uint256 totalStakes;
-        uint256 playerCount;
-        GameResult result;
-        bool gameEnded;
-        uint256 endedAt;
     }
 
-    struct PlayerStakeInfo {
-        uint256 totalStaked;
-        uint256 stakeCount;
-        bool hasClaimed;
+    struct ChainConfig {
+        uint32 domainId;
+        address usdcAddress;
+        address tokenMessenger;
+        address messageTransmitter;
+        bool isSupported;
     }
 
     // Events
     event StakeDeposited(
+        address indexed playerAddress,
         uint256 indexed gameId,
-        address indexed player,
         uint256 amount,
         uint256 newTotal
     );
 
-    event GameEndedInVault(
-        uint256 indexed gameId,
-        GameResult result,
-        uint256 totalStakes,
-        uint256 endedAt
-    );
+    event RewardsTransferred(uint256 indexed gameId, uint256 amount);
 
-    event RewardsClaimed(
+    event CrossChainTransferInitiated(
         uint256 indexed gameId,
-        address indexed player,
-        uint256 amount
+        uint256 amount,
+        uint32 destinationDomain,
+        uint64 nonce
     );
 
     // Core Functions
-    function stake(uint256 gameId, uint256 fixedStakeAmount) external;
+    function stake(
+        address playerAddress,
+        uint256 gameId,
+        uint256 amount
+    ) external;
 
-    function endGame(uint256 gameId, GameResult result) external;
+    function transferRewardsCrossChain(
+        uint256 gameId,
+        uint256 amount,
+        uint256 destinationChainId,
+        address recipient,
+        bool useFastTransfer,
+        uint256 maxFee
+    ) external;
 
     // View Functions
-    function getGameVaultInfo(
-        uint256 gameId
-    ) external view returns (GameVaultInfo memory);
+    function getTotalStakes() external view returns (uint256);
 
-    function getPlayerStakeInfo(
-        uint256 gameId,
-        address player
-    ) external view returns (PlayerStakeInfo memory);
+    function getUsdcContractAddress() external view returns (address);
 
-    function getPlayerStake(
-        uint256 gameId,
-        address player
-    ) external view returns (uint256);
+    function getAuthorizedBackend() external view returns (address);
 
-    function getTotalGameStakes(uint256 gameId) external view returns (uint256);
+    function getTokenMessengerV2() external view returns (address);
 
-    function isGameEnded(uint256 gameId) external view returns (bool);
+    function getMessageTransmitterV2() external view returns (address);
+
+    function getChainConfig(
+        uint256 chainId
+    ) external view returns (ChainConfig memory);
+
+    function isChainSupported(uint256 chainId) external view returns (bool);
 }
