@@ -40,7 +40,7 @@ var supportedChains = map[uint64]ChainConfig{
 	11155111: {
 		RPCUrl:      "https://eth-sepolia.g.alchemy.com/v2/22r8dairb21cjlw7",
 		Name:        "Ethereum Sepolia",
-		EnvVaultKey: "ETHEREUM_SEPOLIA_VAULT_ADDRESS",
+		EnvVaultKey: "ANVIL_ETHEREUM_SEPOLIA_VAULT_CONTRACT_ADDRESS",
 	},
 	// Avalanche Fuji
 	43113: {
@@ -52,7 +52,7 @@ var supportedChains = map[uint64]ChainConfig{
 	11155420: {
 		RPCUrl:      "https://opt-sepolia.g.alchemy.com/v2/22r8dairb21cjlw7",
 		Name:        "OP Sepolia",
-		EnvVaultKey: "OP_SEPOLIA_VAULT_ADDRESS",
+		EnvVaultKey: "ANVIL_OPTIMISM_SEPOLIA_VAULT_CONTRACT_ADDRESS",
 	},
 	// Arbitrum Sepolia
 	421614: {
@@ -64,7 +64,7 @@ var supportedChains = map[uint64]ChainConfig{
 	84532: {
 		RPCUrl:      "https://base-sepolia.g.alchemy.com/v2/22r8dairb21cjlw7",
 		Name:        "Base Sepolia",
-		EnvVaultKey: "BASE_SEPOLIA_VAULT_ADDRESS",
+		EnvVaultKey: "ANVIL_BASE_SEPOLIA_VAULT_ADDRESS",
 	},
 	// Polygon Amoy
 	80002: {

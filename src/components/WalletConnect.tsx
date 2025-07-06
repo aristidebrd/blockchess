@@ -1,11 +1,25 @@
 import React, { useState, useEffect } from 'react';
 import { Wallet, CheckCircle, RefreshCw } from 'lucide-react';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
-import { useAccount, useBalance, useReadContract } from 'wagmi';
+import { useAccount, useBalance, useReadContract, useChainId } from 'wagmi';
 import { formatEther, formatUnits } from 'viem';
 
-// USDC Contract Address (Base Sepolia from your credit script)
-const USDC_CONTRACT_ADDRESS = '0x036CbD53842c5426634e7929541eC2318f3dCF7e';
+// USDC Contract Addresses by Chain ID
+const USDC_ADDRESSES: { [chainId: number]: string } = {
+  // Local Anvil chains (using Base Sepolia USDC for both)
+  84532: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',   // Base Sepolia / Local Base
+  11155420: '0x5fd84259d66Cd46123540766Be93DFE6D43130D7', // OP Sepolia / Local OP
+  // Testnet addresses
+  11155111: '0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238', // Ethereum Sepolia
+  43113: '0x5425890298aed601595a70AB815c96711a31Bc65',    // Avalanche Fuji
+  421614: '0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d',   // Arbitrum Sepolia
+  80002: '0x41E94Eb019C0762f9Bfcf9Fb1E58725BfB0e7582',    // Polygon Amoy
+  1301: '0x31d0220469e10c4E71834a79b1f276d740d3768F',     // Unichain Sepolia
+  59141: '0xFEce4462D57bD51A6A552365A011b95f0E16d9B7',    // Linea Sepolia
+  325000: '0x6d7f141b6819C2c9CC2f818e6ad549E7Ca090F8f',   // Codex Testnet
+  64165: '0xA4879Fed32Ecbef99399e5cbC247E533421C4eC6',    // Sonic Testnet
+  4801: '0x66145f38cBAC35Ca6F1Dfb4914dF98F1614aeA88',     // World Chain Sepolia
+};
 
 // ERC20 ABI for balanceOf function
 const ERC20_ABI = [
@@ -25,8 +39,12 @@ interface WalletConnectProps {
 
 const WalletConnect: React.FC<WalletConnectProps> = ({ onWalletChange, isCompact = false }) => {
   const { address, isConnected } = useAccount();
+  const chainId = useChainId();
   const [usdcBalance, setUsdcBalance] = useState<string>('0.0');
   const [isLoadingUSDC, setIsLoadingUSDC] = useState(false);
+
+  // Get current chain's USDC address
+  const usdcAddress = chainId ? USDC_ADDRESSES[chainId] : undefined;
 
   // Get ETH balance (keep for reference)
   const { data: ethBalance } = useBalance({
@@ -35,12 +53,12 @@ const WalletConnect: React.FC<WalletConnectProps> = ({ onWalletChange, isCompact
 
   // Get USDC balance using contract read
   const { data: usdcBalanceData, refetch: refetchUSDC } = useReadContract({
-    address: USDC_CONTRACT_ADDRESS,
+    address: usdcAddress as `0x${string}`,
     abi: ERC20_ABI,
     functionName: 'balanceOf',
     args: address ? [address] : undefined,
     query: {
-      enabled: !!address && isConnected,
+      enabled: !!address && isConnected && !!usdcAddress,
       refetchInterval: 10000, // Refetch every 10 seconds
     },
   });
@@ -255,7 +273,13 @@ const WalletConnect: React.FC<WalletConnectProps> = ({ onWalletChange, isCompact
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-300">Network:</span>
-                <span className="text-blue-400 font-medium">Anvil Local</span>
+                <span className="text-blue-400 font-medium">Chain {chainId}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-300">USDC Contract:</span>
+                <span className="text-purple-400 font-mono text-xs">
+                  {usdcAddress ? `${usdcAddress.slice(0, 6)}...${usdcAddress.slice(-4)}` : 'Not found'}
+                </span>
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-300">Sufficient funds:</span>

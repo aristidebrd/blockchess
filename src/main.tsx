@@ -34,7 +34,7 @@ const localChainBaseSepolia = {
 
 // Local Foundry chain definition (no explicit type annotation)
 const localChainOptimismSepolia = {
-  id: 84532,
+  id: 11155420,
   name: 'Anvil (Foundry - Optimism Sepolia)',
   network: 'foundry',
   nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
