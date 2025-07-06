@@ -5,8 +5,10 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"blockchess/internal/game"
 	"blockchess/internal/websocket"
@@ -18,8 +20,27 @@ func main() {
 	var addr = flag.String("addr", ":8080", "http service address")
 	flag.Parse()
 
-	// Create game manager
-	gameManager := game.NewManager()
+	// Initialize blockchain clients
+	log.Println("Initializing blockchain clients...")
+	clients, err := game.InitializeClients()
+	if err != nil {
+		log.Printf("Warning: Failed to initialize some blockchain clients: %v", err)
+	}
+
+	// Set up graceful shutdown
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-c
+		log.Println("Shutting down gracefully...")
+		if clients != nil {
+			clients.Close()
+		}
+		os.Exit(0)
+	}()
+
+	// Create game manager with blockchain clients
+	gameManager := game.NewManagerWithClients(clients)
 
 	// Create WebSocket hub
 	hub := websocket.NewHub(gameManager)
@@ -56,6 +77,7 @@ func main() {
 	})
 
 	log.Printf("Server starting on %s", *addr)
+	log.Printf("Blockchain clients ready for multi-chain operations")
 	if err := http.ListenAndServe(*addr, r); err != nil {
 		log.Fatal("ListenAndServe: ", err)
 	}

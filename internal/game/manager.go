@@ -10,6 +10,7 @@ import (
 
 	"github.com/corentings/chess/v2"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/ethclient"
 )
 
 // Constants
@@ -65,6 +66,9 @@ type Manager struct {
 	blockchainService BlockchainService
 	configService     ConfigService
 	endGameProcessor  *EndGameProcessor
+
+	// Blockchain clients for multi-chain operations
+	clients *Clients
 }
 
 // NewManager creates a new game manager with default services
@@ -80,6 +84,24 @@ func NewManager() *Manager {
 		games:             make(map[string]*GameState),
 		blockchainService: blockchainService,
 		configService:     configService,
+	}
+}
+
+// NewManagerWithClients creates a new game manager with blockchain clients
+func NewManagerWithClients(clients *Clients) *Manager {
+	configService := NewConfigService()
+
+	// Try to initialize blockchain service
+	var blockchainService BlockchainService
+	config, _ := configService.LoadBlockchainConfig()
+	blockchainService, _ = NewEthereumBlockchainService(config)
+
+	return &Manager{
+		games:             make(map[string]*GameState),
+		blockchainService: blockchainService,
+		configService:     configService,
+		endGameProcessor:  NewEndGameProcessor(blockchainService),
+		clients:           clients,
 	}
 }
 
@@ -981,4 +1003,17 @@ func (m *Manager) ExecutePermit2(walletAddress string, chainId uint32) error {
 	}
 
 	return ethService.ExecutePermit2(playerAddr, chainId)
+}
+
+// GetClients returns the blockchain clients for multi-chain operations
+func (m *Manager) GetClients() *Clients {
+	return m.clients
+}
+
+// GetClientForChain returns a specific blockchain client by chain ID
+func (m *Manager) GetClientForChain(chainID uint64) (*ethclient.Client, error) {
+	if m.clients == nil {
+		return nil, fmt.Errorf("blockchain clients not initialized")
+	}
+	return m.clients.GetClientByChainID(chainID)
 }
