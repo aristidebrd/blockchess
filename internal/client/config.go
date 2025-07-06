@@ -50,7 +50,7 @@ var supportedChains = map[uint64]ChainConfig{
 	},
 	// OP Sepolia
 	11155420: {
-		RPCUrl:      "https://opt-sepolia.g.alchemy.com/v2/22r8dairb21cjlw7",
+		RPCUrl:      "http://127.0.0.1:8546",
 		Name:        "OP Sepolia",
 		EnvVaultKey: "ANVIL_OPTIMISM_SEPOLIA_VAULT_CONTRACT_ADDRESS",
 	},
@@ -62,7 +62,7 @@ var supportedChains = map[uint64]ChainConfig{
 	},
 	// Base Sepolia
 	84532: {
-		RPCUrl:      "https://base-sepolia.g.alchemy.com/v2/22r8dairb21cjlw7",
+		RPCUrl:      "http://127.0.0.1:8545",
 		Name:        "Base Sepolia",
 		EnvVaultKey: "ANVIL_BASE_SEPOLIA_VAULT_ADDRESS",
 	},
