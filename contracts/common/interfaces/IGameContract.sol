@@ -5,11 +5,10 @@ interface IGameContract {
     // Enums
     enum GameState {
         Active,
-        Ended
+        Finished
     }
 
     enum GameResult {
-        Ongoing,
         WhiteWins,
         BlackWins,
         Draw
@@ -25,20 +24,12 @@ interface IGameContract {
         uint256 gameId;
         GameState state;
         GameResult result;
-        uint256 fixedStakeAmount;
-        uint256 createdAt;
-        uint256 endedAt;
-        uint256 totalWhiteStakes;
-        uint256 totalBlackStakes;
-        uint256 whitePlayerCount;
-        uint256 blackPlayerCount;
     }
 
-    struct PlayerInfo {
+    struct UserInfo {
+        uint32 chainId;
+        uint256 totalVotes;
         Team team;
-        uint256 totalStakes;
-        uint256 moveCount;
-        bool hasJoined;
     }
 
     // Events
@@ -48,57 +39,44 @@ interface IGameContract {
         uint256 createdAt
     );
 
-    event PlayerJoinedTeam(
+    event Vote(
         uint256 indexed gameId,
         address indexed player,
-        Team team
+        Team team,
+        uint32 chainId
     );
 
-    event MoveRecorded(
+    event GameFinished(
         uint256 indexed gameId,
-        address indexed player,
-        uint32 chainId,
-        uint256 newMoveCount
+        GameResult result,
+        uint256 finishedAt
     );
-
-    event GameEnded(uint256 indexed gameId, GameResult result, uint256 endedAt);
 
     // Core Functions
-    function createGame(uint256 gameId, uint256 fixedStakeAmount) external;
+    function initialize(uint256 gameId, uint256 fixedStakeAmount) external;
 
-    function joinTeam(uint256 gameId, Team team) external;
+    function addVote(address player, uint32 chainId, Team team) external;
 
-    function recordMove(
-        uint256 gameId,
-        address player,
-        uint32 chainId
-    ) external;
-
-    function endGame(uint256 gameId, GameResult result) external;
+    function endGame(GameResult result) external;
 
     // View Functions
-    function getGameInfo(
-        uint256 gameId
-    ) external view returns (GameInfo memory);
+    function getGameInfo() external view returns (GameInfo memory);
 
-    function getPlayerInfo(
-        uint256 gameId,
-        address player
-    ) external view returns (PlayerInfo memory);
+    function getGameStatus() external view returns (GameState);
 
-    function getPlayerMoveCount(
-        uint256 gameId,
-        address player,
-        uint32 chainId
-    ) external view returns (uint256);
+    function getGameResult() external view returns (GameResult);
 
-    function calculateRewards(
-        uint256 gameId,
-        address player,
-        uint256 playerTotalStakes
-    ) external view returns (uint256);
+    function getPlayerVoteCounts()
+        external
+        view
+        returns (
+            address[] memory players,
+            uint256[] memory voteCounts,
+            uint32[] memory chainIds,
+            uint256[] memory teams
+        );
 
-    function isGameActive(uint256 gameId) external view returns (bool);
+    function getGameId() external view returns (uint256);
 
-    function getGameResult(uint256 gameId) external view returns (GameResult);
+    function userExists(address userAddress) external view returns (bool);
 }

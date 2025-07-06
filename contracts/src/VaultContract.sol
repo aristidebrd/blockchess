@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.30;
 
-import "../common/interfaces/IVaultContract.sol";
+import {IVaultContract} from "../common/interfaces/IVaultContract.sol";
 
 // USDC Token Interface
 interface IERC20 {
@@ -52,18 +52,22 @@ interface IMessageTransmitterV2 {
 }
 
 contract VaultContract is IVaultContract {
-    address public immutable authorizedBackend;
-    address public immutable usdcContractAddress;
-    address public immutable tokenMessengerV2;
-    address public immutable messageTransmitterV2;
+    address public immutable AUTHORIZED_BACKEND;
+    address public immutable USDC_CONTRACT_ADDRESS;
+    address public immutable TOKEN_MESSENGER_V2;
+    address public immutable MESSAGE_TRANSMITTER_V2;
 
     uint256 public totalStakes;
 
+    // Chain configuration - using the one from interface
+
     mapping(uint256 => ChainConfig) public chainConfigs;
+
+    // Events - using the ones from interface
 
     modifier onlyAuthorizedBackend() {
         require(
-            msg.sender == authorizedBackend,
+            msg.sender == AUTHORIZED_BACKEND,
             "Only authorized backend can transfer rewards"
         );
         _;
@@ -92,10 +96,10 @@ contract VaultContract is IVaultContract {
             "MessageTransmitter V2 cannot be zero address"
         );
 
-        authorizedBackend = _authorizedBackend;
-        usdcContractAddress = _usdcContractAddress;
-        tokenMessengerV2 = _tokenMessengerV2;
-        messageTransmitterV2 = _messageTransmitterV2;
+        AUTHORIZED_BACKEND = _authorizedBackend;
+        USDC_CONTRACT_ADDRESS = _usdcContractAddress;
+        TOKEN_MESSENGER_V2 = _tokenMessengerV2;
+        MESSAGE_TRANSMITTER_V2 = _messageTransmitterV2;
 
         _initializeChainConfigs();
     }
@@ -211,7 +215,7 @@ contract VaultContract is IVaultContract {
 
         // Transfer USDC from player to this contract
         require(
-            IERC20(usdcContractAddress).transferFrom(
+            IERC20(USDC_CONTRACT_ADDRESS).transferFrom(
                 playerAddress,
                 address(this),
                 amount
@@ -242,7 +246,7 @@ contract VaultContract is IVaultContract {
 
         // Approve TokenMessenger to spend USDC
         require(
-            IERC20(usdcContractAddress).approve(tokenMessengerV2, amount),
+            IERC20(USDC_CONTRACT_ADDRESS).approve(TOKEN_MESSENGER_V2, amount),
             "USDC approval failed"
         );
 
@@ -253,11 +257,11 @@ contract VaultContract is IVaultContract {
         uint32 minFinalityThreshold = useFastTransfer ? 1000 : 2000;
 
         // Initiate cross-chain transfer via CCTP
-        uint64 nonce = ITokenMessengerV2(tokenMessengerV2).depositForBurn(
+        uint64 nonce = ITokenMessengerV2(TOKEN_MESSENGER_V2).depositForBurn(
             amount,
             destConfig.domainId,
             mintRecipient,
-            usdcContractAddress,
+            USDC_CONTRACT_ADDRESS,
             bytes32(0), // Any destination caller
             maxFee,
             minFinalityThreshold
@@ -280,19 +284,19 @@ contract VaultContract is IVaultContract {
 
     // Additional view functions for multi-chain deployment info
     function getUsdcContractAddress() external view returns (address) {
-        return usdcContractAddress;
+        return USDC_CONTRACT_ADDRESS;
     }
 
     function getAuthorizedBackend() external view returns (address) {
-        return authorizedBackend;
+        return AUTHORIZED_BACKEND;
     }
 
     function getTokenMessengerV2() external view returns (address) {
-        return tokenMessengerV2;
+        return TOKEN_MESSENGER_V2;
     }
 
     function getMessageTransmitterV2() external view returns (address) {
-        return messageTransmitterV2;
+        return MESSAGE_TRANSMITTER_V2;
     }
 
     function getChainConfig(

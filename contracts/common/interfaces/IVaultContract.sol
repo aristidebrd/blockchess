@@ -23,8 +23,6 @@ interface IVaultContract {
         uint256 newTotal
     );
 
-    event RewardsTransferred(uint256 indexed gameId, uint256 amount);
-
     event CrossChainTransferInitiated(
         uint256 indexed gameId,
         uint256 amount,
