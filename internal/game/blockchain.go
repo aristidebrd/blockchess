@@ -2,6 +2,7 @@ package game
 
 import (
 	"blockchess/contracts-bindings/gamecontract"
+	"blockchess/contracts-bindings/gamefactory"
 	"blockchess/contracts-bindings/permit2"
 	"blockchess/contracts-bindings/vaultcontract"
 	"context"
@@ -17,6 +18,7 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/math"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/signer/core/apitypes"
@@ -24,19 +26,14 @@ import (
 
 // BlockchainService interface defines blockchain operations
 type BlockchainService interface {
-	CreateGame(gameID string, stakeAmount *big.Int) error
-	RecordMove(gameID string, player common.Address, chainID uint32) error
+	CreateGame(stakeAmount *big.Int) (*GameCreationResult, error)
+	RecordMove(gameID string, player common.Address, chainID uint32, team uint8) error
 	EndGame(gameID string, result GameResult) error
 	IsConnected() bool
 	GetGameInfo(gameID string) (*GameInfo, error)
-	CalculateRewards(gameID string, player common.Address, playerTotalStakes *big.Int) (*big.Int, error)
 	StakeOnVote(gameID string, player common.Address, stakeAmount *big.Int) error
-	EndGameInVault(gameID string, result GameResult) error
-	HasPlayerApproved(gameID string, player common.Address) (bool, error)
-	GetPlayerAllowance(player common.Address) (*big.Int, error)
-	CheckPlayerApproval(gameID string, player common.Address) (bool, *big.Int, error)
-	RequireMinimumApproval(gameID string, player common.Address, minAmount *big.Int) error
 	RequestPlayerApproval(playerAddress common.Address, gameID string, approvalAmount *big.Int) (map[string]*ApprovalTransactionData, error)
+	TransferRewardsCrossChain(gameID string, amount *big.Int, destinationChainId *big.Int, recipient common.Address, useFastTransfer bool, maxFee *big.Int) error
 }
 
 // GameResult represents the outcome of a game
@@ -65,15 +62,17 @@ type GameInfo struct {
 
 // EthereumBlockchainService implements BlockchainService for Ethereum
 type EthereumBlockchainService struct {
-	client            bind.ContractBackend
-	gameContract      *gamecontract.Gamecontract
-	gameContractAddr  common.Address
-	vaultContract     *vaultcontract.Vaultcontract
-	vaultContractAddr common.Address
-	auth              *bind.TransactOpts
-	privateKey        *ecdsa.PrivateKey
-	defaultStakeUSDC  *big.Int
-	permits           map[common.Address]*PermitData // Store Permit2 signatures with data
+	client                  bind.ContractBackend
+	gameContract            *gamecontract.Gamecontract
+	gameContractAddr        common.Address
+	vaultContract           *vaultcontract.Vaultcontract
+	vaultContractAddr       common.Address
+	gameFactoryContract     *gamefactory.Gamefactory
+	gameFactoryContractAddr common.Address
+	auth                    *bind.TransactOpts
+	privateKey              *ecdsa.PrivateKey
+	defaultStakeUSDC        *big.Int
+	permits                 map[common.Address]*PermitData // Store Permit2 signatures with data
 }
 
 // BlockchainConfig holds blockchain configuration
@@ -93,7 +92,9 @@ const USDCPermitTypehash = "0x6e71edae12b1b97f4d1f60370fef10105fa2faae0126114a16
 const USDCDomainSeparator = "0x" // This will be computed dynamically
 
 // Permit2 contract address (same on all chains)
-const Permit2ContractAddress = "0x000000000022D473030F116dDEE9F6B43aC78BA3"
+var Permit2ContractAddressByChain = map[uint32]string{
+	31337: "0x000000000022D473030F116dDEE9F6B43aC78BA3",
+}
 
 // Permit2 signature data
 type Permit2Data struct {
@@ -113,6 +114,14 @@ type ApprovalTransactionData struct {
 	Value    string `json:"value"`    // Always "0x0" for ERC20 approve
 	GasLimit string `json:"gasLimit"` // Estimated gas limit
 	GasPrice string `json:"gasPrice"` // Current gas price
+}
+
+// GameCreationResult holds the result of creating a game
+type GameCreationResult struct {
+	GameID              *big.Int
+	GameContractAddress common.Address
+	TransactionHash     common.Hash
+	BlockNumber         uint64
 }
 
 // NewEthereumBlockchainService creates a new Ethereum blockchain service
@@ -172,16 +181,25 @@ func NewEthereumBlockchainService(config *BlockchainConfig) (*EthereumBlockchain
 		return nil, fmt.Errorf("failed to create vault contract instance: %v", err)
 	}
 
+	// Create game factory contract instance (using same address as game contract for now)
+	gameFactoryContractAddr := gameContractAddr // TODO: Update with actual GameFactory address
+	gameFactoryContract, err := gamefactory.NewGamefactory(gameFactoryContractAddr, client)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create game factory contract instance: %v", err)
+	}
+
 	service := &EthereumBlockchainService{
-		client:            client,
-		gameContract:      gameContract,
-		gameContractAddr:  gameContractAddr,
-		vaultContract:     vaultContract,
-		vaultContractAddr: vaultContractAddr,
-		auth:              auth,
-		privateKey:        privateKey,
-		defaultStakeUSDC:  defaultStakeUSDC,
-		permits:           make(map[common.Address]*PermitData),
+		client:                  client,
+		gameContract:            gameContract,
+		gameContractAddr:        gameContractAddr,
+		vaultContract:           vaultContract,
+		vaultContractAddr:       vaultContractAddr,
+		gameFactoryContract:     gameFactoryContract,
+		gameFactoryContractAddr: gameFactoryContractAddr,
+		auth:                    auth,
+		privateKey:              privateKey,
+		defaultStakeUSDC:        defaultStakeUSDC,
+		permits:                 make(map[common.Address]*PermitData),
 	}
 
 	log.Printf("Blockchain service initialized successfully")
@@ -192,13 +210,8 @@ func NewEthereumBlockchainService(config *BlockchainConfig) (*EthereumBlockchain
 	return service, nil
 }
 
-// CreateGame creates a new game on the blockchain
-func (s *EthereumBlockchainService) CreateGame(gameID string, stakeAmount *big.Int) error {
-	gameIDInt, err := s.parseGameID(gameID)
-	if err != nil {
-		return fmt.Errorf("invalid game ID: %v", err)
-	}
-
+// CreateGame creates a new game on the blockchain and returns decoded result
+func (s *EthereumBlockchainService) CreateGame(stakeAmount *big.Int) (*GameCreationResult, error) {
 	// Use provided stake amount or default
 	if stakeAmount == nil {
 		stakeAmount = s.defaultStakeUSDC
@@ -207,27 +220,208 @@ func (s *EthereumBlockchainService) CreateGame(gameID string, stakeAmount *big.I
 	// Get fresh nonce
 	nonce, err := s.client.PendingNonceAt(context.Background(), s.auth.From)
 	if err != nil {
-		return fmt.Errorf("failed to get nonce: %v", err)
+		return nil, fmt.Errorf("failed to get nonce: %v", err)
 	}
 	s.auth.Nonce = big.NewInt(int64(nonce))
 
 	// Create game on contract
-	tx, err := s.gameContract.CreateGame(s.auth, big.NewInt(int64(gameIDInt)), stakeAmount)
+	tx, err := s.gameFactoryContract.CreateGame(s.auth, stakeAmount)
 	if err != nil {
-		return fmt.Errorf("failed to create game on-chain: %v", err)
+		return nil, fmt.Errorf("failed to create game on-chain: %v", err)
 	}
 
-	log.Printf("Game %s created on-chain! Transaction: %s", gameID, tx.Hash().Hex())
-	return nil
+	log.Printf("Game creation transaction sent! Hash: %s", tx.Hash().Hex())
+
+	// Wait for transaction to be mined and decode the result
+	result, err := s.decodeGameCreationTransaction(tx.Hash())
+	if err != nil {
+		log.Printf("Warning: Failed to decode game creation result: %v", err)
+		return nil, err
+	}
+
+	log.Printf("Game created successfully!")
+	log.Printf("  Game ID: %s", result.GameID.String())
+	log.Printf("  Game Contract: %s", result.GameContractAddress.Hex())
+	log.Printf("  Transaction: %s", result.TransactionHash.Hex())
+	log.Printf("  Block: %d", result.BlockNumber)
+
+	return result, nil
+}
+
+// decodeGameCreationTransaction waits for a transaction to be mined and decodes the GameCreated event
+func (s *EthereumBlockchainService) decodeGameCreationTransaction(txHash common.Hash) (*GameCreationResult, error) {
+	// Wait for transaction to be mined
+	receipt, err := s.waitForTransaction(txHash)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get transaction receipt: %v", err)
+	}
+
+	// Check if transaction was successful
+	if receipt.Status != types.ReceiptStatusSuccessful {
+		return nil, fmt.Errorf("transaction failed")
+	}
+
+	// Parse GameCreated event from logs
+	for _, log := range receipt.Logs {
+		// Check if this log is from our GameFactory contract
+		if log.Address != s.gameFactoryContractAddr {
+			continue
+		}
+
+		// Parse the GameCreated event
+		event, err := s.gameFactoryContract.ParseGameCreated(*log)
+		if err != nil {
+			continue // Not a GameCreated event, skip
+		}
+
+		// Return the decoded result
+		return &GameCreationResult{
+			GameID:              event.GameId,
+			GameContractAddress: event.GameContract,
+			TransactionHash:     txHash,
+			BlockNumber:         receipt.BlockNumber.Uint64(),
+		}, nil
+	}
+
+	return nil, fmt.Errorf("GameCreated event not found in transaction logs")
+}
+
+// waitForTransaction waits for a transaction to be mined and returns the receipt
+func (s *EthereumBlockchainService) waitForTransaction(txHash common.Hash) (*types.Receipt, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	// Cast client to ethclient.Client to access TransactionReceipt
+	ethClient, ok := s.client.(*ethclient.Client)
+	if !ok {
+		return nil, fmt.Errorf("client is not an ethclient.Client")
+	}
+
+	// Poll for the transaction receipt
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("timeout waiting for transaction to be mined")
+		default:
+			receipt, err := ethClient.TransactionReceipt(context.Background(), txHash)
+			if err == nil {
+				return receipt, nil
+			}
+
+			// If error is "not found", continue polling
+			if strings.Contains(err.Error(), "not found") {
+				time.Sleep(1 * time.Second)
+				continue
+			}
+
+			// Other errors are actual failures
+			return nil, err
+		}
+	}
+}
+
+// GetGameCreationResult is a helper method to decode any GameFactory transaction
+func (s *EthereumBlockchainService) GetGameCreationResult(txHash common.Hash) (*GameCreationResult, error) {
+	return s.decodeGameCreationTransaction(txHash)
+}
+
+// DecodeGameFactoryTransaction is a standalone method to decode GameFactory createGame transactions
+// This method can be called with any transaction hash to extract gameId and gameContractAddress
+func (s *EthereumBlockchainService) DecodeGameFactoryTransaction(txHashStr string) (*GameCreationResult, error) {
+	// Parse transaction hash
+	txHash := common.HexToHash(txHashStr)
+
+	// Cast client to ethclient.Client to access TransactionReceipt
+	ethClient, ok := s.client.(*ethclient.Client)
+	if !ok {
+		return nil, fmt.Errorf("client is not an ethclient.Client")
+	}
+
+	// Get transaction receipt
+	receipt, err := ethClient.TransactionReceipt(context.Background(), txHash)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get transaction receipt: %v", err)
+	}
+
+	// Check if transaction was successful
+	if receipt.Status != types.ReceiptStatusSuccessful {
+		return nil, fmt.Errorf("transaction failed")
+	}
+
+	// Parse GameCreated event from logs
+	for _, log := range receipt.Logs {
+		// Check if this log is from our GameFactory contract
+		if log.Address != s.gameFactoryContractAddr {
+			continue
+		}
+
+		// Parse the GameCreated event
+		event, err := s.gameFactoryContract.ParseGameCreated(*log)
+		if err != nil {
+			continue // Not a GameCreated event, skip
+		}
+
+		// Return the decoded result
+		return &GameCreationResult{
+			GameID:              event.GameId,
+			GameContractAddress: event.GameContract,
+			TransactionHash:     txHash,
+			BlockNumber:         receipt.BlockNumber.Uint64(),
+		}, nil
+	}
+
+	return nil, fmt.Errorf("GameCreated event not found in transaction logs")
+}
+
+// DecodeTransactionByHash is a convenience method that takes a string hash
+func DecodeGameFactoryTransactionByHash(client *ethclient.Client, gameFactoryAddr common.Address, txHashStr string) (*GameCreationResult, error) {
+	// Parse transaction hash
+	txHash := common.HexToHash(txHashStr)
+
+	// Get transaction receipt
+	receipt, err := client.TransactionReceipt(context.Background(), txHash)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get transaction receipt: %v", err)
+	}
+
+	// Check if transaction was successful
+	if receipt.Status != types.ReceiptStatusSuccessful {
+		return nil, fmt.Errorf("transaction failed")
+	}
+
+	// Create GameFactory contract instance for parsing
+	gameFactory, err := gamefactory.NewGamefactory(gameFactoryAddr, client)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create GameFactory instance: %v", err)
+	}
+
+	// Parse GameCreated event from logs
+	for _, log := range receipt.Logs {
+		// Check if this log is from the GameFactory contract
+		if log.Address != gameFactoryAddr {
+			continue
+		}
+
+		// Parse the GameCreated event
+		event, err := gameFactory.ParseGameCreated(*log)
+		if err != nil {
+			continue // Not a GameCreated event, skip
+		}
+
+		// Return the decoded result
+		return &GameCreationResult{
+			GameID:              event.GameId,
+			GameContractAddress: event.GameContract,
+			TransactionHash:     txHash,
+			BlockNumber:         receipt.BlockNumber.Uint64(),
+		}, nil
+	}
+
+	return nil, fmt.Errorf("GameCreated event not found in transaction logs")
 }
 
 // RecordMove records a move on the blockchain
-func (s *EthereumBlockchainService) RecordMove(gameID string, player common.Address, chainID uint32) error {
-	gameIDInt, err := s.parseGameID(gameID)
-	if err != nil {
-		return fmt.Errorf("invalid game ID: %v", err)
-	}
-
+func (s *EthereumBlockchainService) RecordMove(gameID string, player common.Address, chainID uint32, team uint8) error {
 	// Get fresh nonce
 	nonce, err := s.client.PendingNonceAt(context.Background(), s.auth.From)
 	if err != nil {
@@ -236,7 +430,7 @@ func (s *EthereumBlockchainService) RecordMove(gameID string, player common.Addr
 	s.auth.Nonce = big.NewInt(int64(nonce))
 
 	// Record move on contract
-	tx, err := s.gameContract.RecordMove(s.auth, big.NewInt(int64(gameIDInt)), player, chainID)
+	tx, err := s.gameContract.AddVote(s.auth, player, chainID, team)
 	if err != nil {
 		return fmt.Errorf("failed to record move on-chain: %v", err)
 	}
@@ -247,11 +441,6 @@ func (s *EthereumBlockchainService) RecordMove(gameID string, player common.Addr
 
 // EndGame ends a game on the blockchain
 func (s *EthereumBlockchainService) EndGame(gameID string, result GameResult) error {
-	gameIDInt, err := s.parseGameID(gameID)
-	if err != nil {
-		return fmt.Errorf("invalid game ID: %v", err)
-	}
-
 	// Get fresh nonce
 	nonce, err := s.client.PendingNonceAt(context.Background(), s.auth.From)
 	if err != nil {
@@ -260,7 +449,7 @@ func (s *EthereumBlockchainService) EndGame(gameID string, result GameResult) er
 	s.auth.Nonce = big.NewInt(int64(nonce))
 
 	// End game on contract
-	tx, err := s.gameContract.EndGame(s.auth, big.NewInt(int64(gameIDInt)), uint8(result))
+	tx, err := s.gameContract.EndGame(s.auth, uint8(result))
 	if err != nil {
 		return fmt.Errorf("failed to end game on-chain: %v", err)
 	}
@@ -282,32 +471,24 @@ func (s *EthereumBlockchainService) IsConnected() bool {
 
 // GetGameInfo retrieves game information from the blockchain
 func (s *EthereumBlockchainService) GetGameInfo(gameID string) (*GameInfo, error) {
-	gameIDInt, err := s.parseGameID(gameID)
-	if err != nil {
-		return nil, fmt.Errorf("invalid game ID: %v", err)
-	}
-
 	// Get game info from contract
-	gameInfo, err := s.gameContract.GetGameInfo(nil, big.NewInt(int64(gameIDInt)))
+	gameInfo, err := s.gameContract.GetGameInfo(nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get game info: %v", err)
 	}
 
-	// Check if game is active
-	isActive, err := s.gameContract.IsGameActive(nil, big.NewInt(int64(gameIDInt)))
-	if err != nil {
-		return nil, fmt.Errorf("failed to check game status: %v", err)
-	}
+	// Check if game is active based on state
+	isActive := gameInfo.State == 1 // Assuming 1 = Active state
 
 	return &GameInfo{
 		GameID:           gameInfo.GameId,
-		FixedStakeAmount: gameInfo.FixedStakeAmount,
-		TotalWhiteStakes: gameInfo.TotalWhiteStakes,
-		TotalBlackStakes: gameInfo.TotalBlackStakes,
-		WhitePlayerCount: gameInfo.WhitePlayerCount,
-		BlackPlayerCount: gameInfo.BlackPlayerCount,
-		CreatedAt:        gameInfo.CreatedAt,
-		EndedAt:          gameInfo.EndedAt,
+		FixedStakeAmount: big.NewInt(0), // Not available in new contract
+		TotalWhiteStakes: big.NewInt(0), // Not available in new contract
+		TotalBlackStakes: big.NewInt(0), // Not available in new contract
+		WhitePlayerCount: big.NewInt(0), // Not available in new contract
+		BlackPlayerCount: big.NewInt(0), // Not available in new contract
+		CreatedAt:        big.NewInt(0), // Not available in new contract
+		EndedAt:          big.NewInt(0), // Not available in new contract
 		IsActive:         isActive,
 		Result:           GameResult(gameInfo.Result),
 	}, nil
@@ -333,7 +514,7 @@ func (s *EthereumBlockchainService) StakeOnVote(gameID string, player common.Add
 	s.auth.Nonce = big.NewInt(int64(nonce))
 
 	// Call stakeOnBehalfOf instead of stake
-	tx, err := s.vaultContract.StakeOnBehalfOf(s.auth, big.NewInt(int64(gameIDInt)), player, stakeAmount)
+	tx, err := s.vaultContract.Stake(s.auth, player, big.NewInt(int64(gameIDInt)), stakeAmount)
 	if err != nil {
 		return fmt.Errorf("failed to stake on behalf of player: %v", err)
 	}
@@ -343,46 +524,6 @@ func (s *EthereumBlockchainService) StakeOnVote(gameID string, player common.Add
 	return nil
 }
 
-// EndGameInVault ends a game in the vault contract
-func (s *EthereumBlockchainService) EndGameInVault(gameID string, result GameResult) error {
-	gameIDInt, err := s.parseGameID(gameID)
-	if err != nil {
-		return fmt.Errorf("invalid game ID: %v", err)
-	}
-
-	// Get fresh nonce
-	nonce, err := s.client.PendingNonceAt(context.Background(), s.auth.From)
-	if err != nil {
-		return fmt.Errorf("failed to get nonce: %v", err)
-	}
-	s.auth.Nonce = big.NewInt(int64(nonce))
-
-	// End game in vault contract
-	tx, err := s.vaultContract.EndGame(s.auth, big.NewInt(int64(gameIDInt)), uint8(result))
-	if err != nil {
-		return fmt.Errorf("failed to end game in vault: %v", err)
-	}
-
-	log.Printf("Game %s ended in vault with result %d! Transaction: %s", gameID, result, tx.Hash().Hex())
-	return nil
-}
-
-// CalculateRewards calculates rewards for a player
-func (s *EthereumBlockchainService) CalculateRewards(gameID string, player common.Address, playerTotalStakes *big.Int) (*big.Int, error) {
-	gameIDInt, err := s.parseGameID(gameID)
-	if err != nil {
-		return nil, fmt.Errorf("invalid game ID: %v", err)
-	}
-
-	// Calculate rewards using the game contract
-	rewards, err := s.gameContract.CalculateRewards(nil, big.NewInt(int64(gameIDInt)), player, playerTotalStakes)
-	if err != nil {
-		return nil, fmt.Errorf("failed to calculate rewards: %v", err)
-	}
-
-	return rewards, nil
-}
-
 // parseGameID extracts the numeric ID from a game ID string
 func (s *EthereumBlockchainService) parseGameID(gameID string) (uint64, error) {
 	if strings.HasPrefix(gameID, "game-") {
@@ -390,200 +531,6 @@ func (s *EthereumBlockchainService) parseGameID(gameID string) (uint64, error) {
 		return strconv.ParseUint(idStr, 10, 64)
 	}
 	return strconv.ParseUint(gameID, 10, 64)
-}
-
-// MockBlockchainService implements BlockchainService for testing
-type MockBlockchainService struct {
-	connected bool
-	games     map[string]*GameInfo
-}
-
-// NewMockBlockchainService creates a new mock blockchain service
-func NewMockBlockchainService() *MockBlockchainService {
-	return &MockBlockchainService{
-		connected: true,
-		games:     make(map[string]*GameInfo),
-	}
-}
-
-func (m *MockBlockchainService) CreateGame(gameID string, stakeAmount *big.Int) error {
-	if !m.connected {
-		return fmt.Errorf("blockchain service not connected")
-	}
-
-	gameIDInt, _ := strconv.ParseUint(strings.TrimPrefix(gameID, "game-"), 10, 64)
-	m.games[gameID] = &GameInfo{
-		GameID:           big.NewInt(int64(gameIDInt)),
-		FixedStakeAmount: stakeAmount,
-		IsActive:         true,
-		Result:           GameResultOngoing,
-	}
-
-	log.Printf("Mock: Game %s created", gameID)
-	return nil
-}
-
-func (m *MockBlockchainService) RecordMove(gameID string, player common.Address, chainID uint32) error {
-	if !m.connected {
-		return fmt.Errorf("blockchain service not connected")
-	}
-	log.Printf("Mock: Move recorded for game %s, player %s", gameID, player.Hex())
-	return nil
-}
-
-func (m *MockBlockchainService) EndGame(gameID string, result GameResult) error {
-	if !m.connected {
-		return fmt.Errorf("blockchain service not connected")
-	}
-
-	if game, exists := m.games[gameID]; exists {
-		game.IsActive = false
-		game.Result = result
-	}
-
-	log.Printf("Mock: Game %s ended with result %d", gameID, result)
-	return nil
-}
-
-func (m *MockBlockchainService) IsConnected() bool {
-	return m.connected
-}
-
-func (m *MockBlockchainService) GetGameInfo(gameID string) (*GameInfo, error) {
-	if !m.connected {
-		return nil, fmt.Errorf("blockchain service not connected")
-	}
-
-	if game, exists := m.games[gameID]; exists {
-		return game, nil
-	}
-
-	return nil, fmt.Errorf("game not found")
-}
-
-func (m *MockBlockchainService) StakeOnVote(gameID string, player common.Address, stakeAmount *big.Int) error {
-	if !m.connected {
-		return fmt.Errorf("blockchain service not connected")
-	}
-	log.Printf("Mock: Stake deposited for game %s, player %s, amount %s", gameID, player.Hex(), stakeAmount.String())
-	return nil
-}
-
-func (m *MockBlockchainService) EndGameInVault(gameID string, result GameResult) error {
-	if !m.connected {
-		return fmt.Errorf("blockchain service not connected")
-	}
-	log.Printf("Mock: Game %s ended in vault with result %d", gameID, result)
-	return nil
-}
-
-func (m *MockBlockchainService) CalculateRewards(gameID string, player common.Address, playerTotalStakes *big.Int) (*big.Int, error) {
-	if !m.connected {
-		return nil, fmt.Errorf("blockchain service not connected")
-	}
-	// Mock calculation: return the player's total stakes as rewards
-	log.Printf("Mock: Calculating rewards for game %s, player %s", gameID, player.Hex())
-	return playerTotalStakes, nil
-}
-
-// New: Check if player has approved game participation
-func (s *EthereumBlockchainService) HasPlayerApproved(gameID string, player common.Address) (bool, error) {
-	gameIDInt, err := s.parseGameID(gameID)
-	if err != nil {
-		return false, fmt.Errorf("invalid game ID: %v", err)
-	}
-
-	approved, err := s.vaultContract.HasApprovedGame(nil, player, big.NewInt(int64(gameIDInt)))
-	if err != nil {
-		return false, fmt.Errorf("failed to check player approval: %v", err)
-	}
-
-	return approved, nil
-}
-
-// New: Get player's USDC allowance
-func (s *EthereumBlockchainService) GetPlayerAllowance(player common.Address) (*big.Int, error) {
-	allowance, err := s.vaultContract.GetPlayerAllowance(nil, player)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get player allowance: %v", err)
-	}
-
-	return allowance, nil
-}
-
-// Add this method to MockBlockchainService (around line 440-450)
-func (m *MockBlockchainService) GetPlayerAllowance(player common.Address) (*big.Int, error) {
-	if !m.connected {
-		return nil, fmt.Errorf("blockchain service not connected")
-	}
-	log.Printf("Mock: Getting player allowance for player %s", player.Hex())
-	// Mock: return a large allowance amount (1000 USDC)
-	return big.NewInt(1000000000), nil // 1000 USDC (6 decimals)
-}
-
-func (m *MockBlockchainService) HasPlayerApproved(gameID string, player common.Address) (bool, error) {
-	if !m.connected {
-		return false, fmt.Errorf("blockchain service not connected")
-	}
-	log.Printf("Mock: Checking player approval for game %s, player %s", gameID, player.Hex())
-	return true, nil // Mock: always approved
-}
-
-// CheckPlayerApproval checks if player has approved USDC and game participation
-func (s *EthereumBlockchainService) CheckPlayerApproval(gameID string, player common.Address) (bool, *big.Int, error) {
-	gameIDInt, err := s.parseGameID(gameID)
-	if err != nil {
-		return false, nil, fmt.Errorf("invalid game ID: %v", err)
-	}
-
-	// Check game participation approval
-	approved, err := s.vaultContract.HasApprovedGame(nil, player, big.NewInt(int64(gameIDInt)))
-	if err != nil {
-		return false, nil, fmt.Errorf("failed to check game approval: %v", err)
-	}
-
-	// Check USDC allowance
-	allowance, err := s.vaultContract.GetPlayerAllowance(nil, player)
-	if err != nil {
-		return false, nil, fmt.Errorf("failed to check USDC allowance: %v", err)
-	}
-
-	return approved, allowance, nil
-}
-
-// RequireMinimumApproval checks if player has minimum required approval
-func (s *EthereumBlockchainService) RequireMinimumApproval(gameID string, player common.Address, minAmount *big.Int) error {
-	approved, allowance, err := s.CheckPlayerApproval(gameID, player)
-	if err != nil {
-		return err
-	}
-
-	if !approved {
-		return fmt.Errorf("player must approve game participation first")
-	}
-
-	if allowance.Cmp(minAmount) < 0 {
-		return fmt.Errorf("insufficient USDC allowance: has %s, needs %s", allowance.String(), minAmount.String())
-	}
-
-	return nil
-}
-
-// Add to MockBlockchainService (around line 450)
-func (m *MockBlockchainService) CheckPlayerApproval(gameID string, player common.Address) (bool, *big.Int, error) {
-	if !m.connected {
-		return false, nil, fmt.Errorf("blockchain service not connected")
-	}
-	log.Printf("Mock: Checking approval for game %s, player %s", gameID, player.Hex())
-	return true, big.NewInt(1000000000), nil // Mock: always approved with 1000 USDC allowance
-}
-
-func (m *MockBlockchainService) RequireMinimumApproval(gameID string, player common.Address, minAmount *big.Int) error {
-	if !m.connected {
-		return fmt.Errorf("blockchain service not connected")
-	}
-	log.Printf("Mock: Requiring minimum approval for game %s, player %s, amount %s", gameID, player.Hex(), minAmount.String())
-	return nil // Mock: always sufficient
 }
 
 // GenerateUSDCApprovalTransaction generates transaction data for the player to sign
@@ -691,36 +638,8 @@ func (s *EthereumBlockchainService) RequestPlayerApproval(playerAddress common.A
 	}, nil
 }
 
-// Add to MockBlockchainService
-
-func (m *MockBlockchainService) RequestPlayerApproval(playerAddress common.Address, gameID string, approvalAmount *big.Int) (map[string]*ApprovalTransactionData, error) {
-	if !m.connected {
-		return nil, fmt.Errorf("blockchain service not connected")
-	}
-
-	log.Printf("Mock: Generating approval transactions for player %s, game %s", playerAddress.Hex(), gameID)
-
-	// Return mock transaction data
-	return map[string]*ApprovalTransactionData{
-		"usdcApproval": {
-			To:       USDCContractAddress,
-			Data:     "0x095ea7b3000000000000000000000000" + "0000000000000000000000000000000000000000" + "0000000000000000000000000000000000000000000000000000000005f5e100",
-			Value:    "0x0",
-			GasLimit: "0xea60",
-			GasPrice: "0x3b9aca00",
-		},
-		"gameApproval": {
-			To:       "0x0000000000000000000000000000000000000000", // Mock vault address
-			Data:     "0x00000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000005f5e100",
-			Value:    "0x0",
-			GasLimit: "0x186a0",
-			GasPrice: "0x3b9aca00",
-		},
-	}, nil
-}
-
 // Generate Permit2 signature data for allowance-based permits
-func (s *EthereumBlockchainService) GeneratePermit2SignatureData(playerAddress common.Address) (*apitypes.TypedData, error) {
+func (s *EthereumBlockchainService) GeneratePermit2SignatureData(playerAddress common.Address, chainId uint32) (*apitypes.TypedData, error) {
 	// Use timestamp-based nonce for uniqueness
 	nonce := uint64(time.Now().UnixNano())
 
@@ -743,13 +662,6 @@ func (s *EthereumBlockchainService) GeneratePermit2SignatureData(playerAddress c
 		SigDeadline: big.NewInt(int64(sigDeadline)),
 		Amount:      maxAmountBig,
 		Signature:   "", // Will be set when signature is received
-	}
-
-	// Get chain ID
-	ethClient := s.client.(*ethclient.Client)
-	chainID, err := ethClient.NetworkID(context.Background())
-	if err != nil {
-		return nil, fmt.Errorf("failed to get chain ID: %v", err)
 	}
 
 	// Create EIP-712 typed data for Permit2 allowance-based permit
@@ -775,8 +687,8 @@ func (s *EthereumBlockchainService) GeneratePermit2SignatureData(playerAddress c
 		PrimaryType: "PermitSingle",
 		Domain: apitypes.TypedDataDomain{
 			Name:              "Permit2",
-			ChainId:           (*math.HexOrDecimal256)(chainID),
-			VerifyingContract: Permit2ContractAddress,
+			ChainId:           (*math.HexOrDecimal256)(big.NewInt(int64(chainId))),
+			VerifyingContract: Permit2ContractAddressByChain[chainId],
 		},
 		Message: apitypes.TypedDataMessage{
 			"details": map[string]interface{}{
@@ -794,13 +706,14 @@ func (s *EthereumBlockchainService) GeneratePermit2SignatureData(playerAddress c
 }
 
 // Request Permit2 signature (no amount needed!)
-func (s *EthereumBlockchainService) RequestPermit2(playerAddress common.Address) (*apitypes.TypedData, error) {
-	return s.GeneratePermit2SignatureData(playerAddress)
+func (s *EthereumBlockchainService) RequestPermit2(playerAddress common.Address, chainId uint32) (*apitypes.TypedData, error) {
+	return s.GeneratePermit2SignatureData(playerAddress, chainId)
 }
 
 // Add this method after getUSDCContract
-func (s *EthereumBlockchainService) getPermit2Contract() (*permit2.Permit2, error) {
-	return permit2.NewPermit2(common.HexToAddress(Permit2ContractAddress), s.client)
+func (s *EthereumBlockchainService) getPermit2Contract(chainId uint32) (*permit2.Permit2, error) {
+	permit2ContractAddress := Permit2ContractAddressByChain[chainId]
+	return permit2.NewPermit2(common.HexToAddress(permit2ContractAddress), s.client)
 }
 
 // StorePermit2Signature stores a signed Permit2 signature for later use
@@ -828,7 +741,7 @@ type PermitData struct {
 }
 
 // ExecutePermit2 executes a Permit2 allowance using the stored signature
-func (s *EthereumBlockchainService) ExecutePermit2(playerAddress common.Address) error {
+func (s *EthereumBlockchainService) ExecutePermit2(playerAddress common.Address, chainId uint32) error {
 	// Get the stored permit data
 	permitData, exists := s.permits[playerAddress]
 	if !exists {
@@ -836,7 +749,7 @@ func (s *EthereumBlockchainService) ExecutePermit2(playerAddress common.Address)
 	}
 
 	// Get Permit2 contract
-	permit2Contract, err := s.getPermit2Contract()
+	permit2Contract, err := s.getPermit2Contract(chainId)
 	if err != nil {
 		return fmt.Errorf("failed to get Permit2 contract: %v", err)
 	}
@@ -869,5 +782,20 @@ func (s *EthereumBlockchainService) ExecutePermit2(playerAddress common.Address)
 	}
 
 	log.Printf("Permit2 executed for player %s, tx hash: %s", playerAddress.Hex(), tx.Hash().Hex())
+	return nil
+}
+
+func (s *EthereumBlockchainService) TransferRewardsCrossChain(gameID string, amount *big.Int, destinationChainId *big.Int, recipient common.Address, useFastTransfer bool, maxFee *big.Int) error {
+	gameIDInt, err := s.parseGameID(gameID)
+	if err != nil {
+		return fmt.Errorf("invalid game ID: %v", err)
+	}
+
+	tx, err := s.vaultContract.TransferRewardsCrossChain(s.auth, big.NewInt(int64(gameIDInt)), amount, destinationChainId, recipient, useFastTransfer, maxFee)
+	if err != nil {
+		return fmt.Errorf("failed to transfer rewards cross chain: %v", err)
+	}
+
+	log.Printf("Rewards transferred cross chain for game %s, tx hash: %s", gameID, tx.Hash().Hex())
 	return nil
 }

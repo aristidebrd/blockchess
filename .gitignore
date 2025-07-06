@@ -38,3 +38,5 @@ contracts/build/*
 *.log
 cache/**
 broadcast/**
+
+contracts-bindings/*

@@ -14,7 +14,8 @@ import (
 
 // Constants
 const (
-	GameTimerSeconds = 15 // Timer duration in seconds for each turn
+	GameTimerSeconds = 15   // Timer duration in seconds for each turn
+	StakeAmount      = 0.01 // 0.01 USDC
 )
 
 type Vote struct {
@@ -63,6 +64,7 @@ type Manager struct {
 	// Services (dependency injection)
 	blockchainService BlockchainService
 	configService     ConfigService
+	endGameProcessor  *EndGameProcessor
 }
 
 // NewManager creates a new game manager with default services
@@ -71,19 +73,8 @@ func NewManager() *Manager {
 
 	// Try to initialize blockchain service
 	var blockchainService BlockchainService
-	config, err := configService.LoadBlockchainConfig()
-	if err != nil {
-		log.Printf("Warning: Failed to load blockchain config: %v", err)
-		log.Printf("Using mock blockchain service...")
-		blockchainService = NewMockBlockchainService()
-	} else {
-		blockchainService, err = NewEthereumBlockchainService(config)
-		if err != nil {
-			log.Printf("Warning: Failed to initialize blockchain service: %v", err)
-			log.Printf("Using mock blockchain service...")
-			blockchainService = NewMockBlockchainService()
-		}
-	}
+	config, _ := configService.LoadBlockchainConfig()
+	blockchainService, _ = NewEthereumBlockchainService(config)
 
 	return &Manager{
 		games:             make(map[string]*GameState),
@@ -98,6 +89,7 @@ func NewManagerWithServices(blockchainService BlockchainService, configService C
 		games:             make(map[string]*GameState),
 		blockchainService: blockchainService,
 		configService:     configService,
+		endGameProcessor:  NewEndGameProcessor(blockchainService),
 	}
 }
 
@@ -112,19 +104,24 @@ func (m *Manager) SetGameEndCallback(callback func(gameID, winner, reason string
 }
 
 // GetOrCreateGame gets an existing game or creates a new one
-func (m *Manager) GetOrCreateGame(gameID string) *GameState {
+func (m *Manager) GetOrCreateGame() *GameState {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if game, exists := m.games[gameID]; exists {
-		return game
+	var gameResult *GameCreationResult
+
+	// Create game on blockchain if service is available
+	if m.blockchainService != nil && m.blockchainService.IsConnected() {
+		gameResult, err := m.createGameOnBlockchain(StakeAmount)
+		if err != nil {
+			log.Printf("Error creating game on blockchain: %v", err)
+		} else {
+			log.Printf("Game %s created on-chain! Transaction: %s", gameResult.GameID.String(), gameResult.TransactionHash.Hex())
+		}
 	}
 
-	log.Printf("Creating new game %s locally...", gameID)
-
-	// Create new game locally
 	game := &GameState{
-		ID:                   gameID,
+		ID:                   gameResult.GameID.String(),
 		Votes:                make(map[string]int),
 		TimeLeft:             GameTimerSeconds, // Use constant for timer duration
 		Game:                 chess.NewGame(),
@@ -144,13 +141,7 @@ func (m *Manager) GetOrCreateGame(gameID string) *GameState {
 		PlayerTotalVotes:     make(map[string]int),
 	}
 
-	m.games[gameID] = game
-
-	// Create game on blockchain if service is available
-	if m.blockchainService != nil && m.blockchainService.IsConnected() {
-		log.Printf("Creating game %s on blockchain...", gameID)
-		go m.createGameOnBlockchain(gameID)
-	}
+	m.games[game.ID] = game
 
 	// Start game timer
 	go m.runGameTimer(game)
@@ -171,9 +162,13 @@ func (m *Manager) GetGame(gameID string) *GameState {
 }
 
 // createGameOnBlockchain creates a game on the blockchain asynchronously
-func (m *Manager) createGameOnBlockchain(gameID string) {
-	if err := m.blockchainService.CreateGame(gameID, nil); err != nil {
-		log.Printf("Error creating game %s on blockchain: %v", gameID, err)
+func (m *Manager) createGameOnBlockchain(stakeAmount float64) (*GameCreationResult, error) {
+	stakeAmountBigInt := big.NewInt(int64(stakeAmount * 1e6))
+	if gameResult, err := m.blockchainService.CreateGame(stakeAmountBigInt); err != nil {
+		log.Printf("Error creating game on blockchain: %v", err)
+		return nil, err
+	} else {
+		return gameResult, nil
 	}
 }
 
@@ -288,14 +283,12 @@ func (m *Manager) handleGameEnd(gameID string, gameStats map[string]any) {
 		return
 	}
 
-	// Map chess outcomes to blockchain results
+	// Map chess outcomes to winner and reason
 	var winner, reason string
-	var blockchainResult GameResult
 
 	switch outcome {
 	case chess.WhiteWon:
 		winner = "white"
-		blockchainResult = GameResultWhiteWins
 		if method == chess.Checkmate {
 			reason = "checkmate"
 		} else {
@@ -303,7 +296,6 @@ func (m *Manager) handleGameEnd(gameID string, gameStats map[string]any) {
 		}
 	case chess.BlackWon:
 		winner = "black"
-		blockchainResult = GameResultBlackWins
 		if method == chess.Checkmate {
 			reason = "checkmate"
 		} else {
@@ -311,7 +303,6 @@ func (m *Manager) handleGameEnd(gameID string, gameStats map[string]any) {
 		}
 	case chess.Draw:
 		winner = "draw"
-		blockchainResult = GameResultDraw
 		switch method {
 		case chess.Stalemate:
 			reason = "stalemate"
@@ -326,14 +317,11 @@ func (m *Manager) handleGameEnd(gameID string, gameStats map[string]any) {
 		}
 	}
 
-	// Update blockchain
-	if m.blockchainService != nil && m.blockchainService.IsConnected() {
+	// Process game end using the EndGameProcessor
+	if m.endGameProcessor != nil {
 		go func() {
-			if err := m.blockchainService.EndGame(gameID, blockchainResult); err != nil {
-				log.Printf("Error ending game %s on blockchain: %v", gameID, err)
-			}
-			if err := m.blockchainService.EndGameInVault(gameID, blockchainResult); err != nil {
-				log.Printf("Error ending game %s in vault: %v", gameID, err)
+			if err := m.endGameProcessor.ProcessGameEnd(gameID, winner, game); err != nil {
+				log.Printf("Error processing game end for %s: %v", gameID, err)
 			}
 		}()
 	}
@@ -364,7 +352,7 @@ func (m *Manager) getBestMove(game *GameState) string {
 }
 
 // VoteForMove allows a player to vote for a move
-func (m *Manager) VoteForMove(gameID, walletAddress, move string, team string) error {
+func (m *Manager) VoteForMove(gameID, walletAddress, move string, team string, chainId uint32) error {
 	m.mu.RLock()
 	game, exists := m.games[gameID]
 	m.mu.RUnlock()
@@ -433,7 +421,11 @@ func (m *Manager) VoteForMove(gameID, walletAddress, move string, team string) e
 			player := common.HexToAddress(walletAddress)
 
 			// Record the move
-			if err := m.blockchainService.RecordMove(gameID, player, 31337); err != nil {
+			var teamCode uint8 = 0 // 0 for white, 1 for black
+			if team == "black" {
+				teamCode = 1
+			}
+			if err := m.blockchainService.RecordMove(gameID, player, chainId, teamCode); err != nil {
 				log.Printf("Error recording move on blockchain: %v", err)
 			}
 
@@ -940,32 +932,8 @@ func (m *Manager) SetBlockchainService(service BlockchainService) {
 	m.blockchainService = service
 }
 
-// GetPlayerApprovalStatus returns the approval status for a player
-func (m *Manager) GetPlayerApprovalStatus(gameID, walletAddress string) (bool, string, error) {
-	if m.blockchainService == nil || !m.blockchainService.IsConnected() {
-		return false, "blockchain service not available", nil
-	}
-
-	player := common.HexToAddress(walletAddress)
-	approved, allowance, err := m.blockchainService.CheckPlayerApproval(gameID, player)
-	if err != nil {
-		return false, "", err
-	}
-
-	if !approved {
-		return false, "player must approve game participation", nil
-	}
-
-	minRequired := big.NewInt(1000000) // 1 USDC
-	if allowance.Cmp(minRequired) < 0 {
-		return false, fmt.Sprintf("insufficient USDC allowance: has %s, needs %s", allowance.String(), minRequired.String()), nil
-	}
-
-	return true, "approved", nil
-}
-
 // GeneratePermit2SignatureData generates Permit2 typed data for signing
-func (m *Manager) GeneratePermit2SignatureData(walletAddress string) (interface{}, error) {
+func (m *Manager) GeneratePermit2SignatureData(walletAddress string, chainId uint32) (interface{}, error) {
 	if m.blockchainService == nil {
 		return nil, fmt.Errorf("blockchain service not available")
 	}
@@ -978,7 +946,7 @@ func (m *Manager) GeneratePermit2SignatureData(walletAddress string) (interface{
 		return nil, fmt.Errorf("blockchain service does not support Permit2")
 	}
 
-	return ethService.GeneratePermit2SignatureData(playerAddr)
+	return ethService.GeneratePermit2SignatureData(playerAddr, chainId)
 }
 
 // StorePermit2Signature stores a signed Permit2 signature for a player
@@ -999,7 +967,7 @@ func (m *Manager) StorePermit2Signature(walletAddress, signature string) error {
 }
 
 // ExecutePermit2 executes a Permit2 allowance using the stored signature
-func (m *Manager) ExecutePermit2(walletAddress string) error {
+func (m *Manager) ExecutePermit2(walletAddress string, chainId uint32) error {
 	if m.blockchainService == nil {
 		return fmt.Errorf("blockchain service not available")
 	}
@@ -1012,5 +980,5 @@ func (m *Manager) ExecutePermit2(walletAddress string) error {
 		return fmt.Errorf("blockchain service does not support Permit2")
 	}
 
-	return ethService.ExecutePermit2(playerAddr)
+	return ethService.ExecutePermit2(playerAddr, chainId)
 }

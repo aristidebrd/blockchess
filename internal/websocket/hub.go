@@ -80,7 +80,8 @@ type Message struct {
 	Error            string         `json:"error,omitempty"`      // Error message
 	ValidMoves       []string       `json:"validMoves,omitempty"` // List of valid moves in coordinate notation
 	Signature        string         `json:"signature,omitempty"`  // Permit2 signature
-	TypedData        interface{}    `json:"typedData,omitempty"`  // EIP-712 typed data
+	TypedData        interface{}    `json:"typedData,omitempty"`
+	ChainId          uint32         `json:"chainId,omitempty"` // EIP-712 typed data
 
 	// Game statistics
 	WhitePlayers          int             `json:"whitePlayers,omitempty"`
@@ -326,7 +327,7 @@ func (h *Hub) handleMessage(msg *Message, client *Client) {
 		}
 
 		// Attempt to vote
-		if err := h.gameManager.VoteForMove(msg.GameID, walletAddress, msg.Move, team); err != nil {
+		if err := h.gameManager.VoteForMove(msg.GameID, walletAddress, msg.Move, team, msg.ChainId); err != nil {
 			log.Printf("Vote failed for player %s: %v", walletAddress, err)
 			h.sendErrorToClient(client, err.Error())
 			return
@@ -559,6 +560,7 @@ func (h *Hub) handleMessage(msg *Message, client *Client) {
 
 	case TypeRequestPermit2:
 		walletAddress := msg.WalletAddress
+		chainId := msg.ChainId
 		if walletAddress == "" {
 			log.Printf("No wallet address provided for permit2 request from client %s", client.id)
 			h.sendErrorToClient(client, "Wallet address is required for permit2 request")
@@ -568,7 +570,7 @@ func (h *Hub) handleMessage(msg *Message, client *Client) {
 		// Store the wallet address mapping for this client
 		h.clientWallets[client] = walletAddress
 
-		permit2Data, err := h.gameManager.GeneratePermit2SignatureData(walletAddress)
+		permit2Data, err := h.gameManager.GeneratePermit2SignatureData(walletAddress, chainId)
 		if err != nil {
 			log.Printf("Failed to generate permit2 data for wallet %s: %v", walletAddress, err)
 			h.sendErrorToClient(client, "Failed to generate permit2 data")
@@ -580,7 +582,7 @@ func (h *Hub) handleMessage(msg *Message, client *Client) {
 	case TypeSubmitPermit2Signature:
 		walletAddress := msg.WalletAddress
 		signature := msg.Signature
-
+		chainId := msg.ChainId
 		if walletAddress == "" {
 			log.Printf("No wallet address provided for permit2 signature from client %s", client.id)
 			h.sendErrorToClient(client, "Wallet address is required for permit2 signature")
@@ -602,7 +604,7 @@ func (h *Hub) handleMessage(msg *Message, client *Client) {
 		}
 
 		// Execute the permit2 allowance
-		err = h.gameManager.ExecutePermit2(walletAddress)
+		err = h.gameManager.ExecutePermit2(walletAddress, chainId)
 		if err != nil {
 			log.Printf("Failed to execute permit2 for wallet %s: %v", walletAddress, err)
 			h.sendErrorToClient(client, "Failed to execute permit2")
@@ -647,12 +649,11 @@ func (h *Hub) addToMatchmaking(client *Client, walletAddress string) {
 		player1Client := clients[0]
 		player2Client := clients[1]
 
-		// Create unique game ID
-		gameID := fmt.Sprintf("game-%d", time.Now().Unix())
-
 		// Create the game
-		h.gameManager.GetOrCreateGame(gameID)
+		gameState := h.gameManager.GetOrCreateGame()
 
+		// Create unique game ID
+		gameID := gameState.ID
 		// Assign sides randomly
 		assignedSides := []string{"white", "black"}
 		if time.Now().Unix()%2 == 0 {
