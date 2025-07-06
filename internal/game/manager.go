@@ -304,7 +304,7 @@ func (m *Manager) GetOrCreateGame() *GameState {
 			log.Printf("Created game contract with ID: %d for local game: %s", blockchainGameID, gameID)
 		}
 	} else {
-		log.Fatal("No game factory available")
+		log.Printf("Deployment by base")
 	}
 
 	m.games[game.ID] = game
